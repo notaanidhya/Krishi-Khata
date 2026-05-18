@@ -4,8 +4,9 @@ alembic
 python-dotenv
 firebase-admin
 requests
-uvicorn
+uvicorn>=0.22.0
 pydantic-settings
 google-generativeai
 python-multipart
 httpx
+psycopg2-binary
