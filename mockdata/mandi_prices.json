@@ -1,0 +1,80 @@
+[
+  {
+    "commodity": "Wheat",
+    "variety": "Sharbati",
+    "mandi": "Indore",
+    "state": "Madhya Pradesh",
+    "district": "Indore",
+    "min_price": 2150,
+    "max_price": 2450,
+    "modal_price": 2300,
+    "unit": "quintal",
+    "arrival_date": "2026-05-11",
+    "arrival_tonnes": 1200
+  },
+  {
+    "commodity": "Rice",
+    "variety": "Basmati 1121",
+    "mandi": "Karnal",
+    "state": "Haryana",
+    "district": "Karnal",
+    "min_price": 3800,
+    "max_price": 4200,
+    "modal_price": 4000,
+    "unit": "quintal",
+    "arrival_date": "2026-05-11",
+    "arrival_tonnes": 850
+  },
+  {
+    "commodity": "Onion",
+    "variety": "Red",
+    "mandi": "Lasalgaon",
+    "state": "Maharashtra",
+    "district": "Nashik",
+    "min_price": 800,
+    "max_price": 1400,
+    "modal_price": 1100,
+    "unit": "quintal",
+    "arrival_date": "2026-05-11",
+    "arrival_tonnes": 3500
+  },
+  {
+    "commodity": "Tomato",
+    "variety": "Hybrid",
+    "mandi": "Kolar",
+    "state": "Karnataka",
+    "district": "Kolar",
+    "min_price": 600,
+    "max_price": 1200,
+    "modal_price": 900,
+    "unit": "quintal",
+    "arrival_date": "2026-05-11",
+    "arrival_tonnes": 420
+  },
+  {
+    "commodity": "Soybean",
+    "variety": "Yellow",
+    "mandi": "Latur",
+    "state": "Maharashtra",
+    "district": "Latur",
+    "min_price": 4200,
+    "max_price": 4800,
+    "modal_price": 4500,
+    "unit": "quintal",
+    "arrival_date": "2026-05-11",
+    "arrival_tonnes": 670
+  },
+  {
+    "commodity": "Cotton",
+    "variety": "Medium Staple",
+    "mandi": "Rajkot",
+    "state": "Gujarat",
+    "district": "Rajkot",
+    "min_price": 6200,
+    "max_price": 7000,
+    "modal_price": 6600,
+    "unit": "quintal",
+    "arrival_date": "2026-05-11",
+    "arrival_tonnes": 310
+  }
+]

@@ -1,0 +1,11 @@
+fastapi[all]
+sqlalchemy
+alembic
+python-dotenv
+firebase-admin
+requests
+uvicorn
+pydantic-settings
+google-generativeai
+python-multipart
+httpx

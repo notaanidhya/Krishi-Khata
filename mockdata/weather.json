@@ -1,0 +1,113 @@
+{
+  "location": {
+    "latitude": 23.2599,
+    "longitude": 77.4126,
+    "city": "Bhopal",
+    "state": "Madhya Pradesh"
+  },
+  "current": {
+    "temperature_c": 38,
+    "feels_like_c": 41,
+    "humidity_pct": 42,
+    "wind_speed_kmh": 12,
+    "wind_direction": "SW",
+    "condition": "partly_cloudy",
+    "condition_text": "Partly Cloudy",
+    "uv_index": 9,
+    "visibility_km": 8,
+    "pressure_hpa": 1006
+  },
+  "daily": [
+    {
+      "date": "2026-05-16",
+      "day_name": "Saturday",
+      "temp_max": 40,
+      "temp_min": 27,
+      "condition": "sunny",
+      "condition_text": "Clear Sky",
+      "precipitation_mm": 0,
+      "humidity_pct": 38,
+      "wind_speed_kmh": 10,
+      "uv_index": 10,
+      "advisory": "Good day for spraying pesticides — no wind or rain expected."
+    },
+    {
+      "date": "2026-05-17",
+      "day_name": "Sunday",
+      "temp_max": 41,
+      "temp_min": 28,
+      "condition": "sunny",
+      "condition_text": "Hot & Sunny",
+      "precipitation_mm": 0,
+      "humidity_pct": 35,
+      "wind_speed_kmh": 8,
+      "uv_index": 11,
+      "advisory": "Extreme heat — ensure adequate irrigation and avoid fieldwork 12–3 PM."
+    },
+    {
+      "date": "2026-05-18",
+      "day_name": "Monday",
+      "temp_max": 39,
+      "temp_min": 27,
+      "condition": "partly_cloudy",
+      "condition_text": "Partly Cloudy",
+      "precipitation_mm": 0,
+      "humidity_pct": 45,
+      "wind_speed_kmh": 14,
+      "uv_index": 8,
+      "advisory": "Good conditions for fertilizer application."
+    },
+    {
+      "date": "2026-05-19",
+      "day_name": "Tuesday",
+      "temp_max": 37,
+      "temp_min": 26,
+      "condition": "cloudy",
+      "condition_text": "Overcast",
+      "precipitation_mm": 2,
+      "humidity_pct": 55,
+      "wind_speed_kmh": 18,
+      "uv_index": 5,
+      "advisory": "Light drizzle possible — postpone spraying operations."
+    },
+    {
+      "date": "2026-05-20",
+      "day_name": "Wednesday",
+      "temp_max": 34,
+      "temp_min": 25,
+      "condition": "rain",
+      "condition_text": "Moderate Rain",
+      "precipitation_mm": 22,
+      "humidity_pct": 75,
+      "wind_speed_kmh": 20,
+      "uv_index": 3,
+      "advisory": "Heavy rain expected — ensure proper field drainage. Good for sowing."
+    },
+    {
+      "date": "2026-05-21",
+      "day_name": "Thursday",
+      "temp_max": 33,
+      "temp_min": 24,
+      "condition": "thunderstorm",
+      "condition_text": "Thunderstorms",
+      "precipitation_mm": 40,
+      "humidity_pct": 82,
+      "wind_speed_kmh": 30,
+      "uv_index": 2,
+      "advisory": "Storm warning — avoid open fields. Secure tarpaulins and stored grain."
+    },
+    {
+      "date": "2026-05-22",
+      "day_name": "Friday",
+      "temp_max": 35,
+      "temp_min": 25,
+      "condition": "partly_cloudy",
+      "condition_text": "Clearing Up",
+      "precipitation_mm": 5,
+      "humidity_pct": 58,
+      "wind_speed_kmh": 12,
+      "uv_index": 7,
+      "advisory": "Post-rain — ideal for weeding and inter-cultivation."
+    }
+  ]
+}

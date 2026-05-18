@@ -1,0 +1,25 @@
+{
+  "location": {
+    "latitude": 23.2599,
+    "longitude": 77.4126,
+    "city": "Bhopal",
+    "state": "Madhya Pradesh"
+  },
+  "current": {
+    "temperature_c": 38,
+    "humidity_pct": 42,
+    "wind_speed_kmh": 12,
+    "wind_direction": "SW",
+    "condition": "partly_cloudy",
+    "uv_index": 9
+  },
+  "daily": [
+    { "date": "2026-05-11", "temp_max": 40, "temp_min": 27, "condition": "sunny", "precipitation_mm": 0, "humidity_pct": 38 },
+    { "date": "2026-05-12", "temp_max": 41, "temp_min": 28, "condition": "sunny", "precipitation_mm": 0, "humidity_pct": 35 },
+    { "date": "2026-05-13", "temp_max": 39, "temp_min": 27, "condition": "partly_cloudy", "precipitation_mm": 0, "humidity_pct": 45 },
+    { "date": "2026-05-14", "temp_max": 37, "temp_min": 26, "condition": "cloudy", "precipitation_mm": 2, "humidity_pct": 55 },
+    { "date": "2026-05-15", "temp_max": 34, "temp_min": 25, "condition": "rain", "precipitation_mm": 18, "humidity_pct": 72 },
+    { "date": "2026-05-16", "temp_max": 33, "temp_min": 24, "condition": "thunderstorm", "precipitation_mm": 35, "humidity_pct": 80 },
+    { "date": "2026-05-17", "temp_max": 35, "temp_min": 25, "condition": "partly_cloudy", "precipitation_mm": 5, "humidity_pct": 60 }
+  ]
+}
