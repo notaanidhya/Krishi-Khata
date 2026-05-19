@@ -202,21 +202,15 @@ origins = [
     "https://krishi-khata-frontend.vercel.app", # Your live Vercel app
 ]
 # CORS
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=origins,
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
-# Temporary Nuclear CORS config for debugging
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # <-- THIS IS THE CHANGE (Allows literally any website)
+    allow_origins=origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 # Include routers
 app.include_router(auth.router, prefix=f"{settings.API_V1_STR}/auth", tags=["Authentication"])
 app.include_router(mandi.router, prefix=f"{settings.API_V1_STR}/mandi", tags=["Mandi Prices"])
