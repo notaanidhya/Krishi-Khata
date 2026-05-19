@@ -24,6 +24,8 @@ from app.schemas.crop import (
     CropCycleResponse,
 )
 from app.utils.crop_stages import calculate_stage, get_crop_presets
+from app.models.farm import Farm
+from app.schemas.farm import FarmCreate, FarmResponse
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -98,6 +100,25 @@ def _analyze_with_gemini(raw_content: str, crop_name: str) -> dict | None:
 
 
 # ── Helpers ─────────────────────────────────────────────────────
+def _verify_farm_ownership(farm_id: int, user_id: str, db: Session) -> Farm:
+    """Verify the farm exists and belongs to the user. Returns the Farm or raises 403."""
+    farm = db.query(Farm).filter(Farm.id == farm_id).first()
+    if not farm:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Farm not found")
+    if farm.user_id != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this farm")
+    return farm
+
+
+def _verify_crop_ownership(crop_id: int, user_id: str, db: Session) -> CropCycle:
+    """Verify the crop exists and its farm belongs to the user. Returns the CropCycle or raises 403."""
+    crop = db.query(CropCycle).filter(CropCycle.id == crop_id).first()
+    if not crop:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Crop cycle {crop_id} not found")
+    _verify_farm_ownership(crop.farm_id, user_id, db)
+    return crop
+
+
 def _crop_to_response(crop: CropCycle) -> dict:
     """Convert a CropCycle ORM object to a response dict
     with dynamically calculated stage fields."""
@@ -117,30 +138,58 @@ async def list_crop_presets():
     return get_crop_presets()
 
 
-# ── Farm CRUD (stubs) ──────────────────────────────────────────
-@router.get("/farms")
+# ── Farm CRUD ──────────────────────────────────────────────────
+@router.get("/farms", response_model=list[FarmResponse])
 async def list_farms(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return {"message": "list-farms stub"}
+    """Return all farms owned by the current user."""
+    user_id = current_user.get("uid")
+    farms = (
+        db.query(Farm)
+        .filter(Farm.user_id == user_id)
+        .order_by(Farm.created_at.desc())
+        .all()
+    )
+    return [farm.to_dict() for farm in farms]
 
 
-@router.post("/farms")
+@router.post("/farms", response_model=FarmResponse, status_code=status.HTTP_201_CREATED)
 async def create_farm(
+    payload: FarmCreate,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return {"message": "create-farm stub"}
+    """Create a new farm for the current user."""
+    user_id = current_user.get("uid")
+    farm = Farm(
+        user_id=user_id,
+        name=payload.name,
+        area_acres=payload.area_acres,
+        soil_type=payload.soil_type,
+        district=payload.district or payload.state,
+        state=payload.state,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+    )
+    db.add(farm)
+    db.commit()
+    db.refresh(farm)
+    return farm.to_dict()
 
 
-@router.patch("/farms/{id}")
+@router.patch("/farms/{id}", response_model=FarmResponse)
 async def update_farm(
     id: int,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return {"message": "update-farm stub"}
+    """Update a farm (stub — to be expanded later)."""
+    farm = db.query(Farm).filter(Farm.id == id, Farm.user_id == current_user.get("uid")).first()
+    if not farm:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Farm not found")
+    return farm.to_dict()
 
 
 @router.delete("/farms/{id}")
@@ -149,7 +198,14 @@ async def delete_farm(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return {"message": "delete-farm stub"}
+    """Delete a farm and all its crop cycles."""
+    farm = db.query(Farm).filter(Farm.id == id, Farm.user_id == current_user.get("uid")).first()
+    if not farm:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Farm not found")
+    db.delete(farm)
+    db.commit()
+    return {"message": f"Farm '{farm.name}' deleted", "id": id}
+
 
 
 # ── Crop Cycle — Plant New Crop ─────────────────────────────────
@@ -166,7 +222,10 @@ async def create_crop(
 ):
     """Plant a new crop cycle on a farm.
     Only one ACTIVE crop is allowed per farm at a time.
+    Verifies farm ownership before creating.
     """
+    _verify_farm_ownership(farm_id, current_user.get("uid"), db)
+
     crop = CropCycle(
         farm_id=farm_id,
         crop_name=payload.crop_name,
@@ -194,7 +253,10 @@ async def get_active_crop(
 ):
     """Get the currently ACTIVE crop for a farm with calculated stage.
     Returns 404 if no active crop exists (frontend shows empty state).
+    Verifies farm ownership.
     """
+    _verify_farm_ownership(farm_id, current_user.get("uid"), db)
+
     crop = (
         db.query(CropCycle)
         .options(joinedload(CropCycle.logs))
@@ -217,13 +279,8 @@ async def delete_crop(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Delete a crop cycle."""
-    crop = db.query(CropCycle).filter(CropCycle.id == crop_id).first()
-    if not crop:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Crop cycle {crop_id} not found",
-        )
+    """Delete a crop cycle. Verifies ownership via crop → farm → user."""
+    crop = _verify_crop_ownership(crop_id, current_user.get("uid"), db)
 
     db.delete(crop)
     db.commit()
@@ -241,7 +298,10 @@ async def list_crops(
 ):
     """Get all crop cycles for a farm, optionally filtered by status.
     Each cycle includes its diary logs (newest first).
+    Verifies farm ownership.
     """
+    _verify_farm_ownership(farm_id, current_user.get("uid"), db)
+
     query = (
         db.query(CropCycle)
         .options(joinedload(CropCycle.logs))
@@ -268,20 +328,16 @@ async def add_crop_log(
 ):
     """Add a new diary log entry for a crop cycle.
 
-    1. Sends the farmer's observation to Gemini 1.5 Flash for analysis.
-    2. Extracts growth stage and health notes from the AI response.
-    3. Saves the CropLog with raw + AI-extracted data.
+    1. Verifies crop ownership via crop → farm → user.
+    2. Sends the farmer's observation to Gemini 1.5 Flash for analysis.
+    3. Extracts growth stage and health notes from the AI response.
+    4. Saves the CropLog with raw + AI-extracted data.
 
     If Gemini fails or returns invalid data, the log is saved anyway
     with null AI fields and an ai_analysis_failed flag.
     """
-    # Verify the crop cycle exists
-    crop = db.query(CropCycle).filter(CropCycle.id == crop_id).first()
-    if not crop:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Crop cycle {crop_id} not found",
-        )
+    # Verify ownership: crop → farm → user
+    crop = _verify_crop_ownership(crop_id, current_user.get("uid"), db)
 
     # ── Call Gemini for AI analysis ───────────────────────────
     ai_result = _analyze_with_gemini(payload.raw_content, crop.crop_name)
@@ -315,7 +371,11 @@ async def get_crop_logs(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Get all diary logs for a crop cycle, newest first."""
+    """Get all diary logs for a crop cycle, newest first.
+    Verifies ownership via crop → farm → user.
+    """
+    _verify_crop_ownership(crop_id, current_user.get("uid"), db)
+
     logs = (
         db.query(CropLog)
         .filter(CropLog.crop_cycle_id == crop_id)

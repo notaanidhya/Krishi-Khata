@@ -2,10 +2,12 @@
 KhataTransaction model — Kisan Khata (farmer's ledger).
 Tracks every income and expense entry with category classification.
 Uses transaction_date (not created_at) for all aggregation queries.
+
+Financial amounts use Numeric(12,2) to prevent floating-point rounding errors.
 """
 
 from datetime import date, datetime, timezone
-from sqlalchemy import Column, Integer, String, Float, Date, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Numeric, Date, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from app.models.base import Base
 
@@ -27,7 +29,10 @@ class KhataTransaction(Base):
         String(10), nullable=False,
         comment="'income' or 'expense'",
     )
-    amount = Column(Float, nullable=False)
+    amount = Column(
+        Numeric(12, 2), nullable=False,
+        comment="Amount in INR with 2 decimal precision",
+    )
     category = Column(
         String(50), nullable=False,
         comment="e.g. seeds, fertilizer, labour, pesticide, equipment, sale, subsidy",
@@ -52,7 +57,7 @@ class KhataTransaction(Base):
             "user_id": self.user_id,
             "farm_id": self.farm_id,
             "type": self.type,
-            "amount": self.amount,
+            "amount": float(self.amount),  # Serialize Decimal to float for JSON
             "category": self.category,
             "description": self.description,
             "transaction_date": self.transaction_date.isoformat(),

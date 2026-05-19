@@ -18,13 +18,18 @@ class Settings(BaseSettings):
     FLASK_ENV: str = "development"
     SECRET_KEY: str = "change-me-in-production"
 
+    # JWT — used for device-ID + PIN authentication
+    JWT_SECRET_KEY: str = "krishi-jwt-secret-change-in-production"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRATION_DAYS: int = 90  # Long-lived for rural/offline users
+
     # Database — defaults to SQLite in server/instance/agroo.db
     DATABASE_URL: str = f"sqlite:///{BASE_DIR / 'instance' / 'agroo.db'}"
 
     # CORS — allow Vite dev server
     CORS_ORIGINS: list[str] = ["http://localhost:5173"]
 
-    # Firebase
+    # Firebase (legacy — kept for future OTP upgrade)
     FIREBASE_SERVICE_ACCOUNT_PATH: str = str(BASE_DIR / "firebase-service-account.json")
 
     # Mock data toggle — set to False to hit live APIs
@@ -34,7 +39,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
 
     # data.gov.in — Mandi Price Daily Cache
-    DATAGOV_API_KEY: str = "579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b"
+    DATAGOV_API_KEY: str = ""
     MANDI_CACHE_INTERVAL_HOURS: int = 12
 
     class Config:
