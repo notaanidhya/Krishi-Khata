@@ -7,9 +7,13 @@ To switch to PostgreSQL, set DATABASE_URL in your .env:
 """
 
 from pydantic_settings import BaseSettings
+from pydantic import model_validator
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Sentinel value — used to detect if JWT_SECRET_KEY was never set.
+_JWT_SECRET_NOT_SET = "__NOT_SET__"
 
 
 class Settings(BaseSettings):
@@ -19,9 +23,14 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change-me-in-production"
 
     # JWT — used for device-ID + PIN authentication
-    JWT_SECRET_KEY: str = "krishi-jwt-secret-change-in-production"
+    # No usable default — MUST be provided via .env or environment variable.
+    JWT_SECRET_KEY: str = _JWT_SECRET_NOT_SET
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRATION_DAYS: int = 90  # Long-lived for rural/offline users
+
+    # Dev auth bypass — explicit opt-in, defaults to OFF.
+    # Set ENABLE_DEV_BYPASS=true in .env for local testing without JWT.
+    ENABLE_DEV_BYPASS: bool = False
 
     # Database — defaults to SQLite in server/instance/agroo.db
     DATABASE_URL: str = f"sqlite:///{BASE_DIR / 'instance' / 'agroo.db'}"
@@ -41,6 +50,23 @@ class Settings(BaseSettings):
     # data.gov.in — Mandi Price Daily Cache
     DATAGOV_API_KEY: str = ""
     MANDI_CACHE_INTERVAL_HOURS: int = 12
+
+    @model_validator(mode="after")
+    def _validate_jwt_secret(self):
+        if self.JWT_SECRET_KEY == _JWT_SECRET_NOT_SET:
+            raise ValueError(
+                "\n\n"
+                "╔══════════════════════════════════════════════════════════╗\n"
+                "║  FATAL: JWT_SECRET_KEY is not set!                      ║\n"
+                "║                                                         ║\n"
+                "║  Add JWT_SECRET_KEY=<random-64-char-string> to your     ║\n"
+                "║  .env file or Render environment variables.             ║\n"
+                "║                                                         ║\n"
+                "║  Generate one with:                                     ║\n"
+                "║    python -c \"import secrets; print(secrets.token_urlsafe(64))\"  ║\n"
+                "╚══════════════════════════════════════════════════════════╝\n"
+            )
+        return self
 
     class Config:
         env_file = ".env"

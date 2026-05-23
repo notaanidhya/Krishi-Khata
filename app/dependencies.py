@@ -2,7 +2,8 @@
 Shared FastAPI dependencies — JWT-based auth verification & DB session.
 
 Production: Validates the JWT from Authorization: Bearer <token> header.
-Development: Falls back to a mock user if FLASK_ENV=development AND no token is provided.
+Development: Falls back to a mock user ONLY if ENABLE_DEV_BYPASS=true
+             AND no token is provided. This is OFF by default everywhere.
 """
 
 import jwt
@@ -26,15 +27,15 @@ async def get_current_user(
     Dependency that verifies the JWT from the
     Authorization: Bearer <token> header.
 
-    In development mode, if NO token is present, falls back to
-    a mock user so the app can be tested without auth.
-    If a token IS present (even in dev), it's validated normally.
+    Dev bypass is only active when ENABLE_DEV_BYPASS=true is
+    explicitly set in the environment. It defaults to False
+    everywhere, including when FLASK_ENV=development.
     """
     auth_header = request.headers.get("Authorization")
 
-    # ── Dev fallback — only if no token was sent ──────────────
+    # ── Dev fallback — only if explicitly enabled AND no token ──
     if not auth_header or not auth_header.startswith("Bearer "):
-        if settings.FLASK_ENV == "development":
+        if settings.ENABLE_DEV_BYPASS:
             return DEV_USER
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -70,3 +71,4 @@ async def get_current_user(
             detail="Invalid authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
