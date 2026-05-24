@@ -3,6 +3,8 @@ Mandi API Service — Daily Cache fetcher for data.gov.in.
 
 Fetches commodity prices from the official Government of India
 Open Data API and upserts them into the local MandiPriceCache table.
+Includes retry logic with exponential backoff for Render deployments
+where cross-continent latency to Indian government servers is high.
 
 Endpoint:
   https://api.data.gov.in/resource/35985678-0d79-46b4-9ed6-6f13308a1d24
@@ -14,6 +16,7 @@ Fallback:
   valid data out-of-the-box.
 """
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -34,7 +37,13 @@ GOV_API_URL = (
 )
 
 # How long to wait for the government API (seconds)
-TIMEOUT_SECONDS = 15.0
+# Render free-tier servers are in US/EU; api.data.gov.in is in India.
+# Cross-continent latency + sluggish gov servers need a generous timeout.
+TIMEOUT_SECONDS = 60.0
+
+# Retry config — data.gov.in frequently returns 502/503 or times out
+MAX_RETRIES = 3
+RETRY_BACKOFF_BASE = 5  # seconds; delays will be 5s, 10s, 20s
 
 # Maximum rows to request per call
 RESULT_LIMIT = 500
@@ -158,13 +167,32 @@ async def fetch_and_cache_mandi_prices(
     }
 
     payload = None
-    try:
-        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
-            resp = await client.get(GOV_API_URL, params=params)
-            resp.raise_for_status()
-            payload = resp.json()
-    except Exception as exc:
-        logger.warning("data.gov.in request failed or timed out: %s. Checking fallback seeding.", exc)
+    last_exc = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(TIMEOUT_SECONDS, connect=15.0),
+            ) as client:
+                resp = await client.get(GOV_API_URL, params=params)
+                resp.raise_for_status()
+                payload = resp.json()
+                last_exc = None
+                break  # success
+        except Exception as exc:
+            last_exc = exc
+            if attempt < MAX_RETRIES:
+                delay = RETRY_BACKOFF_BASE * (2 ** (attempt - 1))  # 5s, 10s, 20s
+                logger.warning(
+                    "data.gov.in attempt %d/%d failed: %s — retrying in %ds",
+                    attempt, MAX_RETRIES, exc, delay,
+                )
+                await asyncio.sleep(delay)
+            else:
+                logger.warning(
+                    "data.gov.in attempt %d/%d failed: %s — no retries left. Checking fallback.",
+                    attempt, MAX_RETRIES, exc,
+                )
+    if last_exc is not None:
         use_fallback = True
 
     # Check if empty payload

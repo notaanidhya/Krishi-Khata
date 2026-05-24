@@ -5,7 +5,7 @@ import sys
 
 URL = "https://api.data.gov.in/resource/35985678-0d79-46b4-9ed6-6f13308a1d24"
 PARAMS = {
-    "api-key": "579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b",
+    "api-key": "579b464db66ec23bdd000001d2b8a19146b244e15f4d41f2a092aa70",
     "format": "json",
     "limit": "5",
     "filters[State]": "Madhya Pradesh",
@@ -13,7 +13,8 @@ PARAMS = {
 }
 
 try:
-    resp = httpx.get(URL, params=PARAMS, timeout=30.0)
+    print("Sending request to data.gov.in with a 90-second timeout...")
+    resp = httpx.get(URL, params=PARAMS, timeout=90.0)
     print(f"HTTP {resp.status_code}")
     data = resp.json()
     records = data.get("records", [])
