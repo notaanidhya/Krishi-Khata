@@ -65,7 +65,11 @@ def seed_development_data():
         db.close()
 
 
-seed_development_data()
+# Only seed mock data in local development — never in production
+if settings.FLASK_ENV == "development":
+    seed_development_data()
+else:
+    logger.info("Skipping dev seed — FLASK_ENV=%s", settings.FLASK_ENV)
 
 
 # ════════════════════════════════════════════════════════════════
