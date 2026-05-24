@@ -230,5 +230,6 @@ app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
 
 @app.get("/api/health")
+@app.head("/api/health")    
 def health_check():
     return {"status": "ok", "service": "agroo-fastapi"}
