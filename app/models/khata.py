@@ -4,6 +4,12 @@ Tracks every income and expense entry with category classification.
 Uses transaction_date (not created_at) for all aggregation queries.
 
 Financial amounts use Numeric(12,2) to prevent floating-point rounding errors.
+
+Transaction types:
+  - 'income'        — money received (sales, subsidies, etc.)
+  - 'expense'       — money spent (seeds, fertilizer, etc.)
+  - 'labor_wage'    — money owed to a laborer (increases laborer balance)
+  - 'labor_payment' — money paid to a laborer (decreases laborer balance)
 """
 
 from datetime import date, datetime, timezone
@@ -24,10 +30,15 @@ class KhataTransaction(Base):
         Integer, ForeignKey("farms.id", ondelete="SET NULL"),
         nullable=True, index=True,
     )
+    laborer_id = Column(
+        Integer, ForeignKey("laborers.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+        comment="Links labor_wage/labor_payment transactions to a specific laborer",
+    )
 
     type = Column(
-        String(10), nullable=False,
-        comment="'income' or 'expense'",
+        String(15), nullable=False,
+        comment="'income', 'expense', 'labor_wage', or 'labor_payment'",
     )
     amount = Column(
         Numeric(12, 2), nullable=False,
@@ -47,6 +58,7 @@ class KhataTransaction(Base):
 
     # ── Relationships ──────────────────────────────────────────────
     user = relationship("User", back_populates="transactions")
+    laborer = relationship("Laborer", back_populates="transactions")
 
     def __repr__(self):
         return f"<Khata {self.type} ₹{self.amount} [{self.category}]>"
@@ -56,6 +68,7 @@ class KhataTransaction(Base):
             "id": self.id,
             "user_id": self.user_id,
             "farm_id": self.farm_id,
+            "laborer_id": self.laborer_id,
             "type": self.type,
             "amount": float(self.amount),  # Serialize Decimal to float for JSON
             "category": self.category,

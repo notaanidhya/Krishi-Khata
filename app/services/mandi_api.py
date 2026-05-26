@@ -48,6 +48,13 @@ RETRY_BACKOFF_BASE = 5  # seconds; delays will be 5s, 10s, 20s
 # Maximum rows to request per call
 RESULT_LIMIT = 500
 
+# User-Agent header is critical because data.gov.in (Citrix NetScaler WAF)
+# silent-drops requests with default "python-httpx" User-Agent.
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json"
+}
+
 MOCK_FILE_PATH = Path(__file__).resolve().parent.parent.parent / "mockdata" / "mandi_prices.json"
 
 
@@ -173,7 +180,7 @@ async def fetch_and_cache_mandi_prices(
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(TIMEOUT_SECONDS, connect=15.0),
             ) as client:
-                resp = await client.get(GOV_API_URL, params=params)
+                resp = await client.get(GOV_API_URL, params=params, headers=HEADERS)
                 resp.raise_for_status()
                 payload = resp.json()
                 last_exc = None

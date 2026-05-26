@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import engine
 from app.models.base import Base
-from app.routers import auth, mandi, khata, weather, crop, chat
+from app.routers import auth, mandi, khata, weather, crop, chat, laborers
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +222,7 @@ app.include_router(khata.router, prefix=f"{settings.API_V1_STR}/khata", tags=["K
 app.include_router(weather.router, prefix=f"{settings.API_V1_STR}/weather", tags=["Weather"])
 app.include_router(crop.router, prefix=settings.API_V1_STR, tags=["Farms & Crops"])
 app.include_router(chat.router, prefix=f"{settings.API_V1_STR}/chat", tags=["Community Chat"])
+app.include_router(laborers.router, prefix=settings.API_V1_STR, tags=["Labor Management"])
 
 # Serve uploaded images as static files
 UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads"

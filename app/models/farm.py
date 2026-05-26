@@ -42,6 +42,10 @@ class Farm(Base):
         "CropCycle", back_populates="farm",
         cascade="all, delete-orphan",
     )
+    laborers = relationship(
+        "Laborer", back_populates="farm",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self):
         return f"<Farm {self.name} ({self.district}, {self.state})>"

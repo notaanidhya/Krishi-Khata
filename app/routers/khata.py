@@ -74,6 +74,7 @@ async def create_transaction(
     txn = KhataTransaction(
         user_id=_uid(current_user),
         farm_id=payload.farm_id,
+        laborer_id=payload.laborer_id,
         type=payload.type,
         amount=payload.amount,
         category=payload.category,
