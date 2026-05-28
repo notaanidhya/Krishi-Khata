@@ -34,6 +34,7 @@ def _uid(current_user: dict) -> str:
 @router.get("/transactions", response_model=List[TransactionResponse])
 async def list_transactions(
     farm_id: Optional[int] = Query(None, description="Filter by farm. Null = all farms."),
+    laborer_id: Optional[int] = Query(None, description="Filter by laborer. Returns only their labor_wage/labor_payment transactions."),
     type: Optional[str] = Query(None, description="Filter by 'income' or 'expense'"),
     from_date: Optional[date] = Query(None, description="Start date (inclusive)"),
     to_date: Optional[date] = Query(None, description="End date (inclusive)"),
@@ -42,7 +43,7 @@ async def list_transactions(
 ):
     """
     List transactions for the authenticated user.
-    Supports filtering by farm_id, type, and date range.
+    Supports filtering by farm_id, laborer_id, type, and date range.
     Results are ordered by transaction_date descending (newest first).
     """
     query = db.query(KhataTransaction).filter(
@@ -52,6 +53,8 @@ async def list_transactions(
     # Apply optional filters
     if farm_id is not None:
         query = query.filter(KhataTransaction.farm_id == farm_id)
+    if laborer_id is not None:
+        query = query.filter(KhataTransaction.laborer_id == laborer_id)
     if type is not None:
         query = query.filter(KhataTransaction.type == type)
     if from_date is not None:
@@ -155,9 +158,10 @@ async def get_summary(
         func.coalesce(func.sum(KhataTransaction.amount), 0)
     ).scalar()
 
-    expense = base_query.filter(KhataTransaction.type == "expense").with_entities(
-        func.coalesce(func.sum(KhataTransaction.amount), 0)
-    ).scalar()
+    expense = base_query.filter(
+        KhataTransaction.type.in_(["expense", "labor_wage"])
+    ).with_entities(func.coalesce(func.sum(KhataTransaction.amount), 0)).scalar()
+
 
     count = base_query.count()
 

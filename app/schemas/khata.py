@@ -30,13 +30,6 @@ class TransactionCreate(BaseModel):
 
     @field_validator("category")
     @classmethod
-    def validate_category(cls, v, info):
-        if v not in ALL_CATEGORIES:
-            raise ValueError(f"Invalid category '{v}'. Must be one of: {ALL_CATEGORIES}")
-        return v
-
-    @field_validator("category")
-    @classmethod
     def validate_category_matches_type(cls, v, info):
         """Ensure expense categories aren't used for income and vice versa."""
         txn_type = info.data.get("type")

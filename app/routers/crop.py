@@ -13,6 +13,7 @@ import json
 import logging
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
 from app.database import get_db
 from app.dependencies import get_current_user
@@ -31,6 +32,12 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+# ── AI Crop Doctor Request Model ───────────────────────────────
+class CropAIQuery(BaseModel):
+    query: str = Field(..., min_length=1, max_length=2000, description="The farmer's question about their crop")
+
 
 # ── Gemini AI System Prompt ─────────────────────────────────────
 GEMINI_SYSTEM_PROMPT = (
@@ -383,3 +390,63 @@ async def get_crop_logs(
         .all()
     )
     return [log.to_dict() for log in logs]
+
+
+# ── AI Crop Doctor ─────────────────────────────────────────────
+@router.post("/crops/{crop_id}/ask_ai")
+async def ask_crop_ai(
+    crop_id: int,
+    payload: CropAIQuery,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Ask the AI Crop Doctor a question about a specific crop.
+
+    Uses Gemini to provide agronomist-level advice based on the crop's
+    current growth stage, days since planting, and the farmer's question.
+    Responds in the same language as the user's query.
+    """
+    crop = _verify_crop_ownership(crop_id, current_user.get("uid"), db)
+
+    days_since_planting = (date.today() - crop.planting_date).days
+    current_stage, _ = calculate_stage(crop.crop_name, crop.planting_date)
+
+    system_prompt = (
+        f"You are an expert Indian agronomist and crop doctor. "
+        f"The user is growing {crop.crop_name}, planted {days_since_planting} days ago "
+        f"(current growth stage: {current_stage}). "
+        f"Provide practical, concise advice in simple language. "
+        f"If the issue sounds like a disease or pest, suggest both organic and chemical remedies. "
+        f"Answer in the same language as the user's question."
+    )
+
+    answer: str
+    try:
+        if not settings.GEMINI_API_KEY:
+            raise RuntimeError("GEMINI_API_KEY is not configured")
+
+        import google.generativeai as genai
+
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        model = genai.GenerativeModel(
+            "gemini-flash-latest",
+            system_instruction=system_prompt,
+        )
+
+        response = model.generate_content(payload.query)
+        answer = response.text.strip()
+
+    except Exception as e:
+        logger.error(f"AI Crop Doctor failed: {e}")
+        answer = (
+            "Sorry, the AI Crop Doctor is temporarily unavailable. "
+            "Please try again in a few minutes. If the problem persists, "
+            "consult your local agricultural extension officer."
+        )
+
+    return {
+        "answer": answer,
+        "crop_name": crop.crop_name,
+        "days_since_planting": days_since_planting,
+        "current_stage": current_stage,
+    }

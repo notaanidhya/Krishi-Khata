@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.user import User
+from app.models.farm import Farm
 from app.config import settings
 
 router = APIRouter()
@@ -93,6 +94,17 @@ async def register(
     db.commit()
     db.refresh(user)
 
+    # Auto-provision default hidden farm
+    farm = Farm(
+        user_id=user.id,
+        name="My Farm",
+        area_acres=1.0,
+        district="N/A",
+        state="N/A",
+    )
+    db.add(farm)
+    db.commit()
+
     token = _create_jwt(user.id)
     return AuthResponse(token=token, user=user.to_dict())
 
@@ -111,6 +123,19 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid device ID or PIN.",
         )
+
+    # Auto-provision default hidden farm if none exists (for backwards compatibility)
+    farm_count = db.query(Farm).filter(Farm.user_id == user.id).count()
+    if farm_count == 0:
+        farm = Farm(
+            user_id=user.id,
+            name="My Farm",
+            area_acres=1.0,
+            district="N/A",
+            state="N/A",
+        )
+        db.add(farm)
+        db.commit()
 
     token = _create_jwt(user.id)
     return AuthResponse(token=token, user=user.to_dict())
