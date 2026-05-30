@@ -17,10 +17,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+
 from app.config import settings
 from app.database import engine
 from app.models.base import Base
-from app.routers import auth, mandi, khata, weather, crop, chat, laborers
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +63,38 @@ def seed_development_data():
             db.add(farm1)
             db.add(farm2)
             db.commit()
+
+        from app.models.mandi import MandiPriceHistory
+        if db.query(MandiPriceHistory).count() == 0:
+            from datetime import date, timedelta
+            import random
+            
+            seeds = [
+                {"commodity": "Wheat", "state": "Madhya Pradesh", "district": "Indore", "base": 2300.0},
+                {"commodity": "Wheat", "state": "Madhya Pradesh", "district": "Bhopal", "base": 2200.0},
+                {"commodity": "Rice", "state": "Haryana", "district": "Karnal", "base": 4000.0},
+                {"commodity": "Onion", "state": "Maharashtra", "district": "Nashik", "base": 1100.0},
+                {"commodity": "Tomato", "state": "Karnataka", "district": "Kolar", "base": 900.0},
+                {"commodity": "Soybean", "state": "Maharashtra", "district": "Latur", "base": 4500.0},
+                {"commodity": "Cotton", "state": "Gujarat", "district": "Rajkot", "base": 6600.0},
+            ]
+            
+            today = date.today()
+            for s in seeds:
+                price = s["base"]
+                for days_ago in range(30, -1, -1):
+                    current_date = today - timedelta(days=days_ago)
+                    change_pct = random.uniform(-0.015, 0.015)
+                    price = round(price * (1.0 + change_pct), 2)
+                    
+                    db.add(MandiPriceHistory(
+                        commodity=s["commodity"],
+                        state=s["state"],
+                        district=s["district"],
+                        price=price,
+                        arrival_date=current_date.strftime("%Y-%m-%d")
+                    ))
+            db.commit()
     except Exception:
         db.rollback()
     finally:
@@ -72,122 +108,7 @@ else:
     logger.info("Skipping dev seed — FLASK_ENV=%s", settings.FLASK_ENV)
 
 
-# ════════════════════════════════════════════════════════════════
-#  BACKGROUND: Mandi Price Cache Scheduler (Daily at 6:00 AM IST)
-# ════════════════════════════════════════════════════════════════
 
-from datetime import datetime, timezone, time, timedelta
-
-def get_seconds_until_next_6am_ist() -> float:
-    """Calculate the number of seconds until the next 6:00 AM IST (00:30 UTC)."""
-    now_utc = datetime.now(timezone.utc)
-    target_today = datetime.combine(now_utc.date(), time(0, 30, 0), tzinfo=timezone.utc)
-    if now_utc >= target_today:
-        return (target_today + timedelta(days=1) - now_utc).total_seconds()
-    return (target_today - now_utc).total_seconds()
-
-
-def get_most_recent_6am_ist() -> datetime:
-    """Get the timezone-aware UTC datetime of the most recent 6:00 AM IST (00:30 UTC)."""
-    now_utc = datetime.now(timezone.utc)
-    target_today = datetime.combine(now_utc.date(), time(0, 30, 0), tzinfo=timezone.utc)
-    if now_utc < target_today:
-        return target_today - timedelta(days=1)
-    return target_today
-
-
-async def _mandi_cache_loop():
-    """
-    Background cache manager for Mandi Prices.
-    
-    1. On startup: checks the local database. If the newest record was
-       fetched after the most recent 6:00 AM IST, it reuse the cache
-       and skips the external data.gov.in API call entirely.
-    2. Then, calculates the exact duration until the next 6:00 AM IST
-       and sleeps, ensuring it refreshes exactly once a day at 6:00 AM.
-    """
-    from app.services.mandi_api import fetch_and_cache_mandi_prices
-    from app.database import SessionLocal
-    from app.models.mandi import MandiPriceCache
-
-    api_key = settings.DATAGOV_API_KEY
-    if not api_key:
-        logger.warning("DATAGOV_API_KEY not set — mandi cache scheduler disabled")
-        return
-
-    while True:
-        try:
-            # ── Check cache freshness on startup ────────────────
-            db = SessionLocal()
-            need_fetch = True
-            try:
-                # Find the newest record's fetched_at timestamp
-                newest = (
-                    db.query(MandiPriceCache)
-                    .order_by(MandiPriceCache.fetched_at.desc())
-                    .first()
-                )
-                if newest and newest.fetched_at:
-                    most_recent_6am = get_most_recent_6am_ist()
-                    # Make newest.fetched_at timezone-aware UTC for comparison
-                    newest_fetched_utc = newest.fetched_at.replace(tzinfo=timezone.utc)
-                    
-                    if newest_fetched_utc >= most_recent_6am:
-                        logger.info(
-                            "📦 Local Mandi Cache is fresh! (Last fetched: %s, Threshold: %s). Skipping API call.",
-                            newest_fetched_utc.isoformat(),
-                            most_recent_6am.isoformat(),
-                        )
-                        need_fetch = False
-                    else:
-                        logger.info("📦 Mandi Cache is stale. Initiating refresh.")
-                else:
-                    logger.info("📦 No cached Mandi data found. Initiating first-time fetch.")
-            except Exception as e:
-                logger.error("Failed to check cache age: %s. Defaulting to fetching.", e)
-            finally:
-                db.close()
-
-            # ── Run the fetch only if not fresh ──────────────────
-            if need_fetch:
-                logger.info("🔄 Mandi cache refresh starting...")
-                result = await fetch_and_cache_mandi_prices(api_key=api_key)
-                logger.info(
-                    "✅ Mandi cache refresh done: fetched=%d  upserted=%d  errors=%d  status=%s",
-                    result.get("fetched", 0),
-                    result.get("upserted", 0),
-                    result.get("errors", 0),
-                    result.get("status", "unknown"),
-                )
-
-        except Exception as exc:
-            logger.exception("❌ Mandi cache refresh crashed: %s", exc)
-
-        # ── Sleep until the next 6:00 AM IST ────────────────────
-        seconds_to_sleep = get_seconds_until_next_6am_ist()
-        hours_to_sleep = seconds_to_sleep / 3600.0
-        logger.info(
-            "😴 Mandi scheduler sleeping for %.2f hours (until next 6:00 AM IST / 00:30 UTC)",
-            hours_to_sleep,
-        )
-        await asyncio.sleep(seconds_to_sleep)
-
-
-# ── FastAPI Lifespan (startup + shutdown) ───────────────────────
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """
-    Manages the mandi cache background task across the app lifecycle.
-    """
-    task = asyncio.create_task(_mandi_cache_loop())
-    logger.info("Mandi cache scheduler initialized (Target: Daily at 6:00 AM IST)")
-    yield
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        logger.info("Mandi cache scheduler stopped")
 
 
 # ════════════════════════════════════════════════════════════════
@@ -198,18 +119,23 @@ app = FastAPI(
     title="Krishi Khata API",
     description="Mobile-first PWA backend for Indian farmers",
     version="1.0.0",
-    lifespan=lifespan,
 )
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
+from app.routers import auth, mandi, khata, weather, crop, chat, laborers
 
 origins = [
     "http://localhost:5173", # So your local testing still works
     "https://krishi-khata-frontend.vercel.app", # Your live Vercel app
 ]
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_origin_regex=r"https://krishi-khata-frontend(-[a-z0-9]+)?\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

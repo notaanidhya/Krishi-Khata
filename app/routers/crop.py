@@ -12,8 +12,9 @@ Key endpoints:
 import json
 import logging
 from datetime import date
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel, Field
+from app.main import limiter
 from sqlalchemy.orm import Session, joinedload
 from app.database import get_db
 from app.dependencies import get_current_user
@@ -186,32 +187,6 @@ async def create_farm(
     return farm.to_dict()
 
 
-@router.patch("/farms/{id}", response_model=FarmResponse)
-async def update_farm(
-    id: int,
-    current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Update a farm (stub — to be expanded later)."""
-    farm = db.query(Farm).filter(Farm.id == id, Farm.user_id == current_user.get("uid")).first()
-    if not farm:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Farm not found")
-    return farm.to_dict()
-
-
-@router.delete("/farms/{id}")
-async def delete_farm(
-    id: int,
-    current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Delete a farm and all its crop cycles."""
-    farm = db.query(Farm).filter(Farm.id == id, Farm.user_id == current_user.get("uid")).first()
-    if not farm:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Farm not found")
-    db.delete(farm)
-    db.commit()
-    return {"message": f"Farm '{farm.name}' deleted", "id": id}
 
 
 
@@ -321,80 +296,14 @@ async def list_crops(
     return [_crop_to_response(c) for c in crops]
 
 
-# ── Crop Logs (Smart Farm Diary) ────────────────────────────────
-@router.post(
-    "/crops/{crop_id}/logs",
-    response_model=CropLogResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def add_crop_log(
-    crop_id: int,
-    payload: CropLogCreate,
-    current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Add a new diary log entry for a crop cycle.
 
-    1. Verifies crop ownership via crop → farm → user.
-    2. Sends the farmer's observation to Gemini 1.5 Flash for analysis.
-    3. Extracts growth stage and health notes from the AI response.
-    4. Saves the CropLog with raw + AI-extracted data.
-
-    If Gemini fails or returns invalid data, the log is saved anyway
-    with null AI fields and an ai_analysis_failed flag.
-    """
-    # Verify ownership: crop → farm → user
-    crop = _verify_crop_ownership(crop_id, current_user.get("uid"), db)
-
-    # ── Call Gemini for AI analysis ───────────────────────────
-    ai_result = _analyze_with_gemini(payload.raw_content, crop.crop_name)
-    ai_failed = ai_result is None
-
-    extracted_stage = ai_result["stage"] if ai_result else None
-    health_notes = ai_result["health_notes"] if ai_result else None
-
-    # ── Create the log entry ─────────────────────────────────
-    log = CropLog(
-        crop_cycle_id=crop_id,
-        log_date=payload.log_date,
-        input_type=payload.input_type,
-        raw_content=payload.raw_content,
-        ai_extracted_stage=extracted_stage,
-        ai_health_notes=health_notes,
-    )
-    db.add(log)
-    db.commit()
-    db.refresh(log)
-
-    # Build response with the extra flag
-    response = log.to_dict()
-    response["ai_analysis_failed"] = ai_failed
-    return response
-
-
-@router.get("/crops/{crop_id}/logs", response_model=list[CropLogResponse])
-async def get_crop_logs(
-    crop_id: int,
-    current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Get all diary logs for a crop cycle, newest first.
-    Verifies ownership via crop → farm → user.
-    """
-    _verify_crop_ownership(crop_id, current_user.get("uid"), db)
-
-    logs = (
-        db.query(CropLog)
-        .filter(CropLog.crop_cycle_id == crop_id)
-        .order_by(CropLog.log_date.desc(), CropLog.created_at.desc())
-        .all()
-    )
-    return [log.to_dict() for log in logs]
 
 
 # ── AI Crop Doctor ─────────────────────────────────────────────
 @router.post("/crops/{crop_id}/ask_ai")
+@limiter.limit("10/minute")
 async def ask_crop_ai(
+    request: Request,
     crop_id: int,
     payload: CropAIQuery,
     current_user: dict = Depends(get_current_user),
@@ -450,3 +359,77 @@ async def ask_crop_ai(
         "days_since_planting": days_since_planting,
         "current_stage": current_stage,
     }
+
+
+# ── Crop Cycle — Harvest ───────────────────────────────────────
+@router.post(
+    "/crops/{crop_id}/harvest",
+    response_model=CropCycleResponse,
+)
+async def harvest_crop(
+    crop_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Mark an ACTIVE crop cycle as HARVESTED."""
+    crop = _verify_crop_ownership(crop_id, current_user.get("uid"), db)
+
+    if crop.status == "HARVESTED":
+        raise HTTPException(status_code=400, detail="Crop is already harvested")
+
+    crop.status = "HARVESTED"
+    db.commit()
+    
+    crop_with_logs = (
+        db.query(CropCycle)
+        .options(joinedload(CropCycle.logs))
+        .filter(CropCycle.id == crop_id)
+        .first()
+    )
+
+    return _crop_to_response(crop_with_logs)
+
+
+# ── Crop Diary Logs ────────────────────────────────────────────
+@router.post(
+    "/crops/{crop_id}/logs",
+    response_model=CropLogResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_crop_log(
+    crop_id: int,
+    payload: CropLogCreate,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Add a new diary log (observation) to a crop cycle.
+    Automatically calls the Gemini AI to extract growth stage and health notes.
+    """
+    crop = _verify_crop_ownership(crop_id, current_user.get("uid"), db)
+
+    # Call AI
+    ai_result = _analyze_with_gemini(payload.raw_content, crop.crop_name)
+    
+    stage = None
+    health_notes = None
+    ai_failed = True
+
+    if ai_result:
+        stage = ai_result.get("stage")
+        health_notes = ai_result.get("health_notes")
+        ai_failed = False
+
+    new_log = CropLog(
+        crop_cycle_id=crop.id,
+        log_date=payload.log_date,
+        input_type=payload.input_type,
+        raw_content=payload.raw_content,
+        ai_extracted_stage=stage,
+        ai_health_notes=health_notes,
+        ai_analysis_failed=ai_failed,
+    )
+    db.add(new_log)
+    db.commit()
+    db.refresh(new_log)
+
+    return new_log.to_dict()

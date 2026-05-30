@@ -22,7 +22,7 @@ class CropCycle(Base):
     crop_name = Column(String(100), nullable=False)
     planting_date = Column(Date, nullable=False)
     status = Column(
-        String(20), nullable=False, default="ACTIVE",
+        String(20), nullable=False, index=True, default="ACTIVE",
         comment="ACTIVE | HARVESTED",
     )
 

@@ -8,9 +8,10 @@ GET  /me       — Get current user profile (requires JWT)
 
 import jwt
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
+from app.main import limiter
 
 from app.database import get_db
 from app.dependencies import get_current_user
@@ -90,20 +91,27 @@ async def register(
     )
     user.set_pin(payload.pin)
 
-    db.add(user)
-    db.commit()
-    db.refresh(user)
+    try:
+        db.add(user)
 
-    # Auto-provision default hidden farm
-    farm = Farm(
-        user_id=user.id,
-        name="My Farm",
-        area_acres=1.0,
-        district="N/A",
-        state="N/A",
-    )
-    db.add(farm)
-    db.commit()
+        # Auto-provision default hidden farm
+        farm = Farm(
+            user_id=user.id,
+            name="My Farm",
+            area_acres=1.0,
+            district="N/A",
+            state="N/A",
+        )
+        db.add(farm)
+        
+        db.commit()
+        db.refresh(user)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Registration failed due to a server error."
+        )
 
     token = _create_jwt(user.id)
     return AuthResponse(token=token, user=user.to_dict())
@@ -111,7 +119,9 @@ async def register(
 
 # ── POST /login ────────────────────────────────────────────────
 @router.post("/login", response_model=AuthResponse)
+@limiter.limit("5/minute")
 async def login(
+    request: Request,
     payload: LoginRequest,
     db: Session = Depends(get_db),
 ):

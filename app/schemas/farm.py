@@ -18,16 +18,6 @@ class FarmCreate(BaseModel):
     longitude: Optional[float] = None
 
 
-class FarmUpdate(BaseModel):
-    """Schema for updating a farm (all fields optional)."""
-    name: Optional[str] = Field(default=None, max_length=150)
-    area_acres: Optional[float] = Field(default=None, gt=0)
-    state: Optional[str] = Field(default=None, max_length=100)
-    district: Optional[str] = Field(default=None, max_length=100)
-    soil_type: Optional[str] = Field(default=None, max_length=50)
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
-
 
 class FarmResponse(BaseModel):
     """Schema for farm response."""

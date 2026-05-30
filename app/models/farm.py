@@ -45,6 +45,7 @@ class Farm(Base):
     laborers = relationship(
         "Laborer", back_populates="farm",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
     def __repr__(self):

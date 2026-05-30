@@ -48,8 +48,8 @@ class KhataTransaction(Base):
         String(50), nullable=False,
         comment="e.g. seeds, fertilizer, labour, pesticide, equipment, sale, subsidy",
     )
+    transaction_date = Column(Date, nullable=False, index=True, default=date.today)
     description = Column(String(255), nullable=True)
-    transaction_date = Column(Date, nullable=False, default=date.today)
 
     created_at = Column(
         DateTime, nullable=False,

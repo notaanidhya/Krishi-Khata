@@ -46,6 +46,7 @@ class User(Base):
     farms = relationship(
         "Farm", back_populates="owner",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
     transactions = relationship(
         "KhataTransaction", back_populates="user",

@@ -14,13 +14,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models.mandi import MandiPriceCache
+
 from app.schemas.dashboard import MandiPricesResponse
 
 logger = logging.getLogger(__name__)
@@ -75,79 +75,85 @@ async def get_commodities():
 
 
 # ════════════════════════════════════════════════════════════════
-#  LIVE CACHE (data.gov.in → local MandiPriceCache table)
+#  LIVE CACHE (data.gov.in → in-memory TTLCache)
 # ════════════════════════════════════════════════════════════════
 
+from app.main import limiter
+from fastapi import Request
+from app.models.farm import Farm
+from app.utils.mandi_api import fetch_mandi_prices, upsert_prices_to_db
+from app.models.mandi import MandiPriceHistory
+
 @router.get("/latest")
+@limiter.limit("20/minute")
 async def get_latest_prices(
+    request: Request,
     commodity: Optional[str] = Query(None, description="Filter by commodity name"),
     district: Optional[str] = Query(None, description="Filter by district"),
-    market: Optional[str]   = Query(None, description="Filter by market name"),
-    limit: int              = Query(100, ge=1, le=500, description="Max rows"),
+    state: Optional[str]    = Query(None, description="Filter by state"),
     db: Session             = Depends(get_db),
+    current_user: dict      = Depends(get_current_user),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
 ):
     """
-    Latest mandi prices from the local cache (populated by data.gov.in).
-
-    This route **never** calls the external government API directly.
-    It only queries the MandiPriceCache SQLite table that is
-    refreshed by the background scheduler every 12 hours.
-
-    Returns:
-        {
-          "count":        int,
-          "last_fetched": "ISO datetime",
-          "prices":       [ ... ]
-        }
+    Latest mandi prices from data.gov.in with in-memory caching.
+    Uses smart defaulting to pull the active farmer's state/district.
     """
-    query = db.query(MandiPriceCache)
+    if not district and not state:
+        user_id = current_user.get("uid")
+        farm = db.query(Farm).filter(Farm.user_id == user_id).first()
+        
+        if farm and farm.state and farm.district and farm.state != "N/A" and farm.district != "N/A":
+            state = farm.state
+            district = farm.district
+        else:
+            # Fallback
+            state = "Madhya Pradesh"
+            district = "Indore"
 
-    # ── Optional filters (case-insensitive) ─────────────────────
-    if commodity:
-        query = query.filter(
-            MandiPriceCache.commodity.ilike(f"%{commodity}%")
-        )
-    if district:
-        query = query.filter(
-            MandiPriceCache.district.ilike(f"%{district}%")
-        )
-    if market:
-        query = query.filter(
-            MandiPriceCache.market.ilike(f"%{market}%")
-        )
-
-    # Most recent records first, capped at limit
-    rows = (
-        query
-        .order_by(desc(MandiPriceCache.fetched_at))
-        .limit(limit)
-        .all()
-    )
-
-    if not rows:
-        return {
-            "count": 0,
-            "last_fetched": None,
-            "prices": [],
-            "message": "No cached mandi data yet. The background job may still be running.",
-        }
-
-    # Determine the most recent fetch timestamp
-    last_fetched = max(
-        (r.fetched_at for r in rows if r.fetched_at),
-        default=datetime.now(timezone.utc),
-    )
-
+    data = fetch_mandi_prices(state=state, district=district, commodity=commodity)
+    records = data.get("records", [])
+    
+    if records:
+        background_tasks.add_task(upsert_prices_to_db, records)
+    
     return {
-        "count": len(rows),
-        "last_fetched": last_fetched.isoformat(),
-        "prices": [row.to_dict() for row in rows],
+        "count": len(records),
+        "last_fetched": datetime.now(timezone.utc).isoformat(),
+        "prices": records,
     }
 
 
 # ════════════════════════════════════════════════════════════════
 #  USER BOOKMARK STUBS (require auth)
 # ════════════════════════════════════════════════════════════════
+
+@router.get("/history")
+async def get_mandi_history(
+    commodity: str = Query(..., description="Commodity name"),
+    district: str = Query(..., description="District name"),
+    db: Session = Depends(get_db),
+):
+    """
+    Get the last 30 days of local historical prices for a given commodity and district.
+    Returns exactly what exists in the database.
+    """
+    records = (
+        db.query(MandiPriceHistory)
+        .filter(
+            MandiPriceHistory.commodity.ilike(commodity),
+            MandiPriceHistory.district.ilike(district)
+        )
+        .order_by(desc(MandiPriceHistory.arrival_date))
+        .limit(30)
+        .all()
+    )
+    
+    # Reverse to return chronological order (earliest to latest) for charting
+    records_chronological = sorted(records, key=lambda x: x.arrival_date)
+    
+    return [r.to_dict() for r in records_chronological]
+
 
 @router.post("/saved")
 async def save_mandi(

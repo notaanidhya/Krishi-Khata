@@ -17,10 +17,13 @@ from typing import List
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, UploadFile, File, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+import jwt
 
 from app.database import get_db, SessionLocal
 from app.models.chat import CommunityMessage
 from app.schemas.chat import ChatMessageResponse
+from app.config import settings
+from app.dependencies import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +32,7 @@ router = APIRouter()
 UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".pdf"}
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
 
 
@@ -77,7 +80,10 @@ manager = ConnectionManager()
 # ═══════════════════════════════════════════════════════════════
 
 @router.get("/history", response_model=List[ChatMessageResponse])
-async def get_chat_history(db: Session = Depends(get_db)):
+async def get_chat_history(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
     """Return the last 50 community messages, oldest first."""
     messages = (
         db.query(CommunityMessage)
@@ -91,7 +97,10 @@ async def get_chat_history(db: Session = Depends(get_db)):
 
 
 @router.post("/upload")
-async def upload_image(file: UploadFile = File(...)):
+async def upload_image(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Upload an image for the community chat.
     Returns the static URL to embed in a chat message.
@@ -126,20 +135,28 @@ async def upload_image(file: UploadFile = File(...)):
 # ═══════════════════════════════════════════════════════════════
 
 @router.websocket("/ws/chat")
-async def websocket_chat(websocket: WebSocket):
+async def websocket_chat(websocket: WebSocket, token: str = None):
     """
     Real-time community chat WebSocket.
 
-    Expects JSON messages:
-    {
-      "device_id": "...",
-      "sender_name": "...",
-      "content": "...",        // optional
-      "image_url": "/uploads/..." // optional
-    }
-
-    On receive: saves to DB → broadcasts to all connected clients.
+    Expects a token query parameter: /ws/chat?token={jwt_string}
     """
+    if not token:
+        if not settings.ENABLE_DEV_BYPASS:
+            return await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+    else:
+        try:
+            payload = jwt.decode(
+                token,
+                settings.JWT_SECRET_KEY,
+                algorithms=[settings.JWT_ALGORITHM],
+            )
+            uid = payload.get("uid")
+            if not uid:
+                return await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+            return await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+
     await manager.connect(websocket)
     try:
         while True:

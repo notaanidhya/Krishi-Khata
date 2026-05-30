@@ -12,8 +12,9 @@ import json
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from app.schemas.dashboard import WeatherResponse
+from app.main import limiter
 
 import httpx
 
@@ -488,7 +489,9 @@ def _generate_ai_weather_summary(city: str, state: str, daily_data: dict) -> str
 # ── Advanced Weather Dashboard ─────────────────────────────────
 
 @router.get("/dashboard")
+@limiter.limit("10/minute")
 async def get_weather_dashboard(
+    request: Request,
     lat: float = DEFAULT_LAT,
     lon: float = DEFAULT_LON,
     city: str = DEFAULT_CITY,

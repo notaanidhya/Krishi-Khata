@@ -7,13 +7,6 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
-class ChatMessageCreate(BaseModel):
-    """Incoming WebSocket message payload."""
-    device_id: str = Field(..., min_length=1, max_length=64)
-    sender_name: str = Field(..., min_length=1, max_length=100)
-    content: Optional[str] = None
-    image_url: Optional[str] = None
-
 
 class ChatMessageResponse(BaseModel):
     """Outgoing message shape — broadcast to all clients."""
