@@ -130,12 +130,12 @@ from app.routers import auth, mandi, khata, weather, crop, chat, laborers
 
 origins = [
     "http://localhost:5173", # So your local testing still works
-    "https://krishi-khata-frontend.vercel.app", # Your live Vercel app
+    "https://krishi-khata.vercel.app", # Your live Vercel app
 ]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_origin_regex=r"https://krishi-khata-frontend(-[a-z0-9]+)?\.vercel\.app",
+    allow_origin_regex=r"https://krishi-khata(-[a-z0-9]+)?\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
