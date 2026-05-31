@@ -75,6 +75,45 @@ async def get_commodities():
 
 
 # ════════════════════════════════════════════════════════════════
+#  METADATA (Searchable Dropdowns)
+# ════════════════════════════════════════════════════════════════
+
+TOP_CROPS = [
+    "Wheat", "Soybean", "Mustard", "Onion", "Tomato", "Cotton", "Rice", "Maize", 
+    "Gram", "Potato", "Garlic", "Ginger", "Turmeric", "Chana", "Moong", "Urad", 
+    "Toor", "Jowar", "Bajra", "Ragi", "Groundnut", "Sesame", "Sunflower", "Safflower", 
+    "Castor Seed", "Linseed", "Coriander", "Cumin", "Fennel", "Fenugreek"
+]
+
+TOP_DISTRICTS = [
+    "Indore", "Ujjain", "Bhopal", "Pune", "Nashik", "Ahmednagar", "Nagpur", "Jalgaon", 
+    "Rajkot", "Surat", "Ahmedabad", "Jaipur", "Jodhpur", "Kota", "Bikaner", "Ludhiana", 
+    "Amritsar", "Karnal", "Panipat", "Agra", "Aligarh", "Kanpur", "Lucknow", "Varanasi", 
+    "Patna", "Muzaffarpur", "Raipur", "Bhilai", "Ranchi", "Guwahati"
+]
+
+@router.get("/metadata")
+async def get_mandi_metadata(db: Session = Depends(get_db)):
+    """
+    Returns unique commodities and districts for searchable dropdowns.
+    Combines hardcoded popular lists with actual history entries in the DB.
+    """
+    from app.models.mandi import MandiPriceHistory
+    
+    # Get distinct from DB
+    db_commodities = [row[0] for row in db.query(MandiPriceHistory.commodity).distinct().all()]
+    db_districts = [row[0] for row in db.query(MandiPriceHistory.district).distinct().all()]
+    
+    # Merge and deduplicate (case insensitive)
+    commodity_set = {c.title() for c in TOP_CROPS + db_commodities if c}
+    district_set = {d.title() for d in TOP_DISTRICTS + db_districts if d}
+    
+    return {
+        "commodities": sorted(list(commodity_set)),
+        "districts": sorted(list(district_set))
+    }
+
+# ════════════════════════════════════════════════════════════════
 #  LIVE CACHE (data.gov.in → in-memory TTLCache)
 # ════════════════════════════════════════════════════════════════
 
