@@ -81,7 +81,7 @@ async def get_commodities():
 from app.main import limiter
 from fastapi import Request
 from app.models.farm import Farm
-from app.utils.mandi_api import fetch_mandi_prices, upsert_prices_to_db
+from app.utils.mandi_api import fetch_mandi_prices, upsert_prices_to_db, fetch_historical_mandi_prices
 from app.models.mandi import MandiPriceHistory
 
 @router.get("/latest")
@@ -125,34 +125,90 @@ async def get_latest_prices(
 
 
 # ════════════════════════════════════════════════════════════════
-#  USER BOOKMARK STUBS (require auth)
+#  HISTORY — with JIT backfill for cold-start markets
 # ════════════════════════════════════════════════════════════════
 
+# Minimum number of local records before we skip the live backfill.
+_MIN_LOCAL_RECORDS = 7
+
+
+def _resolve_state_for_district(district: str, db: Session) -> str:
+    """
+    Try to infer the state from an existing MandiPriceHistory row for this
+    district.  Falls back to 'Madhya Pradesh' which covers the majority of
+    the current user-base.
+    """
+    existing = (
+        db.query(MandiPriceHistory.state)
+        .filter(MandiPriceHistory.district.ilike(district))
+        .first()
+    )
+    return existing[0] if existing else "Madhya Pradesh"
+
+
 @router.get("/history")
-async def get_mandi_history(
+def get_mandi_history(
     commodity: str = Query(..., description="Commodity name"),
     district: str = Query(..., description="District name"),
     db: Session = Depends(get_db),
 ):
     """
-    Get the last 30 days of local historical prices for a given commodity and district.
-    Returns exactly what exists in the database.
+    Get the last 30 days of historical prices for a given commodity+district.
+
+    JIT backfill: if the local DB has fewer than 7 records for this query,
+    we pull real history from data.gov.in, upsert it, and then return.
+    First-time requests may take 2-4 s while the government API responds.
     """
+    # ── Step 1: query local DB ───────────────────────────────────────
     records = (
         db.query(MandiPriceHistory)
         .filter(
             MandiPriceHistory.commodity.ilike(commodity),
-            MandiPriceHistory.district.ilike(district)
+            MandiPriceHistory.district.ilike(district),
         )
         .order_by(desc(MandiPriceHistory.arrival_date))
         .limit(30)
         .all()
     )
-    
-    # Reverse to return chronological order (earliest to latest) for charting
+
+    # ── Step 2: check sufficiency ────────────────────────────────────
+    backfilled = False
+
+    if len(records) < _MIN_LOCAL_RECORDS:
+        # ── Step 3 (JIT Trigger): live backfill from govt API ────────
+        state = _resolve_state_for_district(district, db)
+        inserted = fetch_historical_mandi_prices(
+            state=state,
+            district=district,
+            commodity=commodity,
+            days_back=30,
+        )
+        logger.info(
+            f"JIT backfill for {commodity}/{district}: "
+            f"{inserted} records upserted"
+        )
+
+        if inserted > 0:
+            backfilled = True
+            # ── Step 4: re-query after backfill ──────────────────────
+            records = (
+                db.query(MandiPriceHistory)
+                .filter(
+                    MandiPriceHistory.commodity.ilike(commodity),
+                    MandiPriceHistory.district.ilike(district),
+                )
+                .order_by(desc(MandiPriceHistory.arrival_date))
+                .limit(30)
+                .all()
+            )
+
+    # Return chronological order for charting (earliest → latest)
     records_chronological = sorted(records, key=lambda x: x.arrival_date)
-    
-    return [r.to_dict() for r in records_chronological]
+
+    return {
+        "records": [r.to_dict() for r in records_chronological],
+        "backfilled": backfilled,
+    }
 
 
 @router.post("/saved")

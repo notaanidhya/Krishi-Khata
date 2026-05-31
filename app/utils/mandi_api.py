@@ -1,5 +1,6 @@
 import logging
-from typing import Optional, Dict, Any
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, List
 import httpx
 from cachetools import cached, TTLCache
 from app.config import settings
@@ -118,3 +119,103 @@ def upsert_prices_to_db(records: list):
         logger.error(f"Error in upsert_prices_to_db: {e}")
     finally:
         db.close()
+
+
+# ════════════════════════════════════════════════════════════════
+#  JIT HISTORICAL BACKFILL
+# ════════════════════════════════════════════════════════════════
+
+def _parse_date_safe(date_str: str) -> Optional[datetime]:
+    """Try to parse a normalized YYYY-MM-DD string into a datetime."""
+    try:
+        return datetime.strptime(date_str, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return None
+
+
+def fetch_historical_mandi_prices(
+    state: str,
+    district: str,
+    commodity: str,
+    days_back: int = 30,
+) -> int:
+    """
+    JIT historical backfill — pulls commodity price history from data.gov.in
+    and bulk-upserts into MandiPriceHistory.
+
+    The data.gov.in Agmarknet daily-price resource does NOT support date-range
+    query filters.  The API returns records sorted by most-recent arrival date
+    when given State/District/Commodity filters.  We therefore:
+
+      1. Fetch a large batch (limit=1000) filtered by state+district+commodity.
+      2. Normalize every Arrival_Date to YYYY-MM-DD.
+      3. Client-side filter: keep only records whose date falls within the
+         last `days_back` days from today.
+      4. Bulk-upsert the filtered set into MandiPriceHistory via the existing
+         upsert helper (which handles deduplication by the table's unique
+         constraint on commodity+state+district+arrival_date).
+
+    Returns the count of records that were upserted.
+    """
+    api_key = settings.DATAGOV_API_KEY
+    if not api_key:
+        logger.warning("DATAGOV_API_KEY not set — skipping historical backfill.")
+        return 0
+
+    params = {
+        "api-key": api_key,
+        "format": "json",
+        "limit": "1000",                     # pull as many as the API allows
+        "filters[State]": state,
+        "filters[District]": district,
+        "filters[Commodity]": commodity,
+    }
+
+    all_records: List[dict] = []
+
+    try:
+        with httpx.Client(timeout=60.0) as client:
+            # Page through results (offset-based) to maximise coverage
+            for offset in range(0, 2000, 1000):
+                params["offset"] = str(offset)
+                resp = client.get(GOV_API_URL, params=params, headers=HEADERS)
+                resp.raise_for_status()
+                page = resp.json()
+                batch = page.get("records", [])
+                if not batch:
+                    break
+                all_records.extend(batch)
+                # If we received fewer than the limit, there are no more pages
+                if len(batch) < 1000:
+                    break
+    except Exception as e:
+        logger.error(f"Historical backfill API error: {e}")
+        return 0
+
+    if not all_records:
+        logger.info(
+            f"No historical records returned for {commodity} / {district} / {state}"
+        )
+        return 0
+
+    # ── Client-side date-range filter ────────────────────────────────
+    cutoff = datetime.now() - timedelta(days=days_back)
+    filtered: List[dict] = []
+    for r in all_records:
+        raw_date = r.get("Arrival_Date") or r.get("arrival_date") or ""
+        norm = normalize_date(raw_date)
+        dt = _parse_date_safe(norm)
+        if dt and dt >= cutoff:
+            filtered.append(r)
+
+    logger.info(
+        f"Historical backfill: {len(all_records)} fetched, "
+        f"{len(filtered)} within last {days_back} days for "
+        f"{commodity}/{district}/{state}"
+    )
+
+    # ── Bulk-upsert into DB ──────────────────────────────────────────
+    if filtered:
+        upsert_prices_to_db(filtered)
+
+    return len(filtered)
