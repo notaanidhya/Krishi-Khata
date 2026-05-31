@@ -433,7 +433,7 @@ def _build_soil_insights(daily_data: dict) -> dict:
     }
 
 
-def _generate_ai_weather_summary(city: str, state: str, daily_data: dict) -> str:
+def _generate_ai_weather_summary(city: str, state: str, daily_data: dict, target_language: str = "English") -> str:
     """Call Gemini for a hyper-concise agronomist weather advisory."""
     from app.config import settings
 
@@ -472,7 +472,8 @@ def _generate_ai_weather_summary(city: str, state: str, daily_data: dict) -> str
                 f"The upcoming 7-day forecast for {city}, {state} predicts: {weather_summary}. "
                 f"Provide a hyper-concise 2-sentence summary warning the farmer of specific risks "
                 f"(heat stress, fungal risks due to humidity, harvesting logistics). "
-                f"Speak practically in simple Hindi-English mix."
+                f"You MUST respond natively in {target_language}. Avoid overly formal or academic terms; "
+                f"use vocabulary easily understood by a typical Indian farmer."
             ),
         )
         response = model.generate_content("Give me today's agricultural weather advisory.")
@@ -576,8 +577,12 @@ async def get_weather_dashboard(
                 "humidity_pct": round(humidities[i], 1) if i < len(humidities) else 50,
             })
 
+        # Extract requested language for AI
+        accept_lang = request.headers.get("Accept-Language", "en").lower()
+        target_language = "Hindi (using natural, conversational Devanagari script)" if "hi" in accept_lang else "English"
+
         # AI Summary (can be slow — tolerant of failures)
-        ai_summary = _generate_ai_weather_summary(city, state, daily_raw)
+        ai_summary = _generate_ai_weather_summary(city, state, daily_raw, target_language)
 
         return {
             "location": {"city": city, "state": state, "latitude": lat, "longitude": lon},

@@ -320,13 +320,18 @@ async def ask_crop_ai(
     days_since_planting = (date.today() - crop.planting_date).days
     current_stage, _ = calculate_stage(crop.crop_name, crop.planting_date)
 
+    # Extract requested language for AI
+    accept_lang = request.headers.get("Accept-Language", "en").lower()
+    target_language = "Hindi (using natural, conversational Devanagari script)" if "hi" in accept_lang else "English"
+
     system_prompt = (
         f"You are an expert Indian agronomist and crop doctor. "
         f"The user is growing {crop.crop_name}, planted {days_since_planting} days ago "
         f"(current growth stage: {current_stage}). "
         f"Provide practical, concise advice in simple language. "
         f"If the issue sounds like a disease or pest, suggest both organic and chemical remedies. "
-        f"Answer in the same language as the user's question."
+        f"You MUST respond natively in {target_language}. Avoid overly formal or academic terms; "
+        f"use vocabulary easily understood by a typical Indian farmer."
     )
 
     answer: str
