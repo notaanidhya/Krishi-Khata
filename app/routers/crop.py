@@ -337,7 +337,10 @@ async def ask_crop_ai(
     answer: str
     try:
         if not settings.GEMINI_API_KEY:
-            raise RuntimeError("GEMINI_API_KEY is not configured")
+            logger.warning("GEMINI_API_KEY is not configured - degrading gracefully.")
+            return {
+                "advice": "AI Agronomist is currently offline. Please consult standard local farming practices."
+            }
 
         import google.generativeai as genai
 

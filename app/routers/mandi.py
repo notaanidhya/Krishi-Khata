@@ -125,7 +125,7 @@ from app.models.mandi import MandiPriceHistory
 
 @router.get("/latest")
 @limiter.limit("20/minute")
-async def get_latest_prices(
+def get_latest_prices(
     request: Request,
     commodity: Optional[str] = Query(None, description="Filter by commodity name"),
     district: Optional[str] = Query(None, description="Filter by district"),
@@ -142,7 +142,11 @@ async def get_latest_prices(
         user_id = current_user.get("uid")
         farm = db.query(Farm).filter(Farm.user_id == user_id).first()
         
-        if farm and farm.state and farm.district and farm.state != "N/A" and farm.district != "N/A":
+        if (farm and farm.state and farm.district 
+            and farm.state != "N/A" and farm.district != "N/A" 
+            and farm.district.lower() != "madhya pradesh"
+            and farm.state.lower() != "n/a"
+            and farm.district.lower() != "n/a"):
             state = farm.state
             district = farm.district
         else:

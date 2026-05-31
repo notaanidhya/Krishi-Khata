@@ -11,6 +11,7 @@ import os
 import json
 import uuid
 import logging
+import asyncio
 from pathlib import Path
 from datetime import datetime
 from typing import List
@@ -47,13 +48,13 @@ class ConnectionManager:
         self.active_connections: list[WebSocket] = []
 
     async def connect(self, websocket: WebSocket):
-        await websocket.accept()
         self.active_connections.append(websocket)
         logger.info(f"WS connected. Total: {len(self.active_connections)}")
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-        logger.info(f"WS disconnected. Total: {len(self.active_connections)}")
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+            logger.info(f"WS disconnected. Total: {len(self.active_connections)}")
 
     async def broadcast(self, message: dict):
         """Send a message dict to every connected client."""
@@ -135,17 +136,25 @@ async def upload_image(
 # ═══════════════════════════════════════════════════════════════
 
 @router.websocket("/ws/chat")
-async def websocket_chat(websocket: WebSocket, token: str = None):
+async def websocket_chat(websocket: WebSocket):
     """
     Real-time community chat WebSocket.
-
-    Expects a token query parameter: /ws/chat?token={jwt_string}
+    Authenticates via first-message payload over the socket.
     """
-    if not token:
-        if not settings.ENABLE_DEV_BYPASS:
+    await websocket.accept()
+
+    try:
+        raw_auth = await asyncio.wait_for(websocket.receive_text(), timeout=3.0)
+        auth_data = json.loads(raw_auth)
+        
+        if auth_data.get("type") != "auth":
             return await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-    else:
-        try:
+            
+        token = auth_data.get("token")
+        if not token:
+            if not settings.ENABLE_DEV_BYPASS:
+                return await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        else:
             payload = jwt.decode(
                 token,
                 settings.JWT_SECRET_KEY,
@@ -154,8 +163,16 @@ async def websocket_chat(websocket: WebSocket, token: str = None):
             uid = payload.get("uid")
             if not uid:
                 return await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
-            return await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                
+    except asyncio.TimeoutError:
+        logger.warning("WebSocket authentication timed out")
+        return await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+    except (json.JSONDecodeError, jwt.ExpiredSignatureError, jwt.InvalidTokenError) as e:
+        logger.warning(f"WebSocket auth failed: {e}")
+        return await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+    except Exception as e:
+        logger.error(f"Unexpected error during WS auth: {e}", exc_info=True)
+        return await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
 
     await manager.connect(websocket)
     try:
@@ -165,6 +182,10 @@ async def websocket_chat(websocket: WebSocket, token: str = None):
                 data = json.loads(raw)
             except json.JSONDecodeError:
                 await websocket.send_text(json.dumps({"error": "Invalid JSON"}))
+                continue
+
+            # Ignore duplicate auth payloads safely
+            if data.get("type") == "auth":
                 continue
 
             # Validate required fields
