@@ -120,7 +120,7 @@ async def get_mandi_metadata(db: Session = Depends(get_db)):
 from app.main import limiter
 from fastapi import Request
 from app.models.farm import Farm
-from app.utils.mandi_api import fetch_mandi_prices, upsert_prices_to_db, fetch_historical_mandi_prices
+from app.utils.mandi_api import fetch_mandi_prices, upsert_prices_to_db, fetch_historical_mandi_prices, normalize_date
 from app.models.mandi import MandiPriceHistory
 
 @router.get("/latest")
@@ -159,6 +159,26 @@ def get_latest_prices(
     
     if records:
         background_tasks.add_task(upsert_prices_to_db, records)
+        
+        # Deduplicate records by commodity, keeping only the one with the latest arrival_date
+        records_sorted = sorted(
+            records,
+            key=lambda r: normalize_date(r.get("arrival_date") or r.get("Arrival_Date") or ""),
+            reverse=True
+        )
+        
+        seen_commodities = set()
+        deduped_records = []
+        for r in records_sorted:
+            comm = r.get("commodity") or r.get("Commodity")
+            if not comm:
+                continue
+            comm_lower = comm.lower()
+            if comm_lower not in seen_commodities:
+                seen_commodities.add(comm_lower)
+                deduped_records.append(r)
+                
+        records = deduped_records
     
     return {
         "count": len(records),

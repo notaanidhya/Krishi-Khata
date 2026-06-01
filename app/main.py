@@ -130,6 +130,7 @@ from app.routers import auth, mandi, khata, weather, crop, chat, laborers
 
 origins = [
     "http://localhost:5173", # So your local testing still works
+    "http://localhost:5174", # Allowed port when 5173 is in use
     "https://krishi-khata.vercel.app", # Your live Vercel app
 ]
 app.add_middleware(

@@ -77,7 +77,7 @@ def upsert_prices_to_db(records: list):
     
     db = SessionLocal()
     try:
-        db_records = []
+        db_records_map = {}
         for r in records:
             comm = r.get("commodity") or r.get("Commodity")
             state = r.get("state") or r.get("State")
@@ -97,14 +97,16 @@ def upsert_prices_to_db(records: list):
             if not arr_date:
                 continue
                 
-            db_records.append({
+            key = (comm, state, dist, arr_date)
+            db_records_map[key] = {
                 "commodity": comm,
                 "state": state,
                 "district": dist,
                 "price": price,
                 "arrival_date": arr_date
-            })
+            }
             
+        db_records = list(db_records_map.values())
         if not db_records:
             return
 
