@@ -77,6 +77,7 @@ def upsert_prices_to_db(records: list):
     
     db = SessionLocal()
     try:
+        db_records = []
         for r in records:
             comm = r.get("commodity") or r.get("Commodity")
             state = r.get("state") or r.get("State")
@@ -96,23 +97,48 @@ def upsert_prices_to_db(records: list):
             if not arr_date:
                 continue
                 
-            existing = db.query(MandiPriceHistory).filter(
-                MandiPriceHistory.commodity == comm,
-                MandiPriceHistory.state == state,
-                MandiPriceHistory.district == dist,
-                MandiPriceHistory.arrival_date == arr_date
-            ).first()
+            db_records.append({
+                "commodity": comm,
+                "state": state,
+                "district": dist,
+                "price": price,
+                "arrival_date": arr_date
+            })
             
-            if existing:
-                existing.price = price
-            else:
-                db.add(MandiPriceHistory(
-                    commodity=comm,
-                    state=state,
-                    district=dist,
-                    price=price,
-                    arrival_date=arr_date
-                ))
+        if not db_records:
+            return
+
+        dialect_name = db.bind.dialect.name
+        if dialect_name == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert
+            
+            stmt = insert(MandiPriceHistory).values(db_records)
+            stmt = stmt.on_conflict_do_nothing(
+                index_elements=['commodity', 'state', 'district', 'arrival_date']
+            )
+            db.execute(stmt)
+        elif dialect_name == "sqlite":
+            from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+            
+            stmt = sqlite_insert(MandiPriceHistory).values(db_records)
+            stmt = stmt.on_conflict_do_nothing(
+                index_elements=['commodity', 'state', 'district', 'arrival_date']
+            )
+            db.execute(stmt)
+        else:
+            # Fallback for other database dialects
+            for record_data in db_records:
+                existing = db.query(MandiPriceHistory).filter(
+                    MandiPriceHistory.commodity == record_data["commodity"],
+                    MandiPriceHistory.state == record_data["state"],
+                    MandiPriceHistory.district == record_data["district"],
+                    MandiPriceHistory.arrival_date == record_data["arrival_date"]
+                ).first()
+                if existing:
+                    existing.price = record_data["price"]
+                else:
+                    db.add(MandiPriceHistory(**record_data))
+                    
         db.commit()
     except Exception as e:
         db.rollback()
