@@ -144,7 +144,7 @@ async def websocket_chat(websocket: WebSocket):
     await websocket.accept()
 
     try:
-        raw_auth = await asyncio.wait_for(websocket.receive_text(), timeout=3.0)
+        raw_auth = await asyncio.wait_for(websocket.receive_text(), timeout=15.0)
         auth_data = json.loads(raw_auth)
         
         if auth_data.get("type") != "auth":
