@@ -274,29 +274,4 @@ def get_mandi_history(
     }
 
 
-@router.post("/saved")
-async def save_mandi(
-    current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Bookmark a mandi+commodity combination."""
-    return {"message": "save-mandi stub"}
 
-
-@router.get("/saved")
-async def get_saved(
-    current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Get user's bookmarked mandis."""
-    return {"message": "get-saved stub"}
-
-
-@router.delete("/saved/{id}")
-async def delete_saved(
-    id: int,
-    current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Remove a bookmark."""
-    return {"message": "delete-saved stub"}

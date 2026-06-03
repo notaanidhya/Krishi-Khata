@@ -5,7 +5,7 @@ CropLog model  — farm-diary entries linked to a crop cycle,
 """
 
 from datetime import datetime, date as date_type, timezone
-from sqlalchemy import Column, Integer, String, Date, DateTime, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, Date, DateTime, Text, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from app.models.base import Base
 
@@ -91,6 +91,10 @@ class CropLog(Base):
         Text, nullable=True,
         comment="Health observations extracted by LLM",
     )
+    ai_analysis_failed = Column(
+        Boolean, nullable=False, default=False,
+        comment="Whether the LLM failed to analyze this log",
+    )
 
     created_at = Column(
         DateTime, nullable=False,
@@ -112,5 +116,6 @@ class CropLog(Base):
             "raw_content": self.raw_content,
             "ai_extracted_stage": self.ai_extracted_stage,
             "ai_health_notes": self.ai_health_notes,
+            "ai_analysis_failed": self.ai_analysis_failed,
             "created_at": self.created_at.isoformat(),
         }

@@ -52,10 +52,6 @@ class User(Base):
         "KhataTransaction", back_populates="user",
         cascade="all, delete-orphan",
     )
-    saved_mandis = relationship(
-        "SavedMandi", back_populates="user",
-        cascade="all, delete-orphan",
-    )
 
     # ── PIN helpers ────────────────────────────────────────────────
     def set_pin(self, raw_pin: str):
