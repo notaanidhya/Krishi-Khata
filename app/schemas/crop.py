@@ -58,6 +58,8 @@ class CropCycleResponse(BaseModel):
     status: str
     days_since_planting: int
     current_stage: str
+    cumulative_gdd: float
+    is_processing: bool
     created_at: str
     updated_at: str
     logs: List[CropLogResponse] = []
