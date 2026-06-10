@@ -140,11 +140,13 @@ async def _crop_to_response(crop: CropCycle) -> dict:
     total_gdd = crop.cumulative_gdd + today_gdd
     
     current_stage = calculate_stage_by_gdd(crop.crop_name, total_gdd)
+    known_crops = get_crop_presets()
 
     d = crop.to_dict()
     d["days_since_planting"] = days
     d["current_stage"] = current_stage
     d["cumulative_gdd"] = total_gdd
+    d["is_processing"] = crop.crop_name not in known_crops
     d["logs"] = [log.to_dict() for log in (crop.logs or [])]
     return d
 
