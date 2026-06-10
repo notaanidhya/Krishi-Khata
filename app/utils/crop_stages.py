@@ -10,6 +10,8 @@ Usage:
 """
 
 from datetime import date
+from app.database import SessionLocal
+from app.models.dynamic_crop import DynamicCrop
 
 
 # ── Growth stage intervals (cumulative days from planting) ──────
@@ -122,12 +124,40 @@ STAGE_ORDER = ["Seedling", "Vegetative", "Flowering", "Ready to Harvest"]
 
 def get_crop_presets() -> list[str]:
     """Return sorted list of all known crop names."""
-    return sorted(CROP_STAGE_MAP.keys())
+    presets = list(CROP_STAGE_MAP.keys())
+    try:
+        db = SessionLocal()
+        dynamic_crops = db.query(DynamicCrop).all()
+        for dc in dynamic_crops:
+            if dc.crop_name not in presets:
+                presets.append(dc.crop_name)
+        db.close()
+    except Exception:
+        pass
+    return sorted(presets)
 
 
 def get_stages_for_crop(crop_name: str) -> dict[str, int]:
     """Return stage intervals for a crop, falling back to defaults."""
-    return CROP_STAGE_MAP.get(crop_name, DEFAULT_STAGES)
+    if crop_name in CROP_STAGE_MAP:
+        return CROP_STAGE_MAP[crop_name]
+    
+    try:
+        db = SessionLocal()
+        dynamic_crop = db.query(DynamicCrop).filter(DynamicCrop.crop_name == crop_name).first()
+        db.close()
+        if dynamic_crop:
+            return dynamic_crop.to_dict()
+    except Exception:
+        pass
+
+    return DEFAULT_STAGES
+
+
+def get_gdd_stages_for_crop(crop_name: str) -> dict[str, float]:
+    """Return GDD stage intervals for a crop, assuming ~15 GDD/day from the original day map."""
+    stages_in_days = CROP_STAGE_MAP.get(crop_name, DEFAULT_STAGES)
+    return {k: v * 15.0 for k, v in stages_in_days.items()}
 
 
 def calculate_stage(crop_name: str, planting_date: date) -> tuple[str, int]:
@@ -155,3 +185,17 @@ def calculate_stage(crop_name: str, planting_date: date) -> tuple[str, int]:
 
     # Past the last boundary — still "Ready to Harvest"
     return ("Ready to Harvest", days)
+
+
+def calculate_stage_by_gdd(crop_name: str, cumulative_gdd: float) -> str:
+    if cumulative_gdd <= 0:
+        return "Seedling"
+
+    stages = get_gdd_stages_for_crop(crop_name)
+
+    for stage_name in STAGE_ORDER:
+        boundary = stages.get(stage_name)
+        if boundary and cumulative_gdd <= boundary:
+            return stage_name
+
+    return "Ready to Harvest"

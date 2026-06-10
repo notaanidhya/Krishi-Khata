@@ -577,12 +577,10 @@ async def get_weather_dashboard(
                 "humidity_pct": round(humidities[i], 1) if i < len(humidities) else 50,
             })
 
-        # Extract requested language for AI
-        accept_lang = request.headers.get("Accept-Language", "en").lower()
-        target_language = "Hindi (using natural, conversational Devanagari script)" if "hi" in accept_lang else "English"
+        # AI summary is now fetched separately via /ai-advisory for faster load times
 
-        # AI Summary (can be slow — tolerant of failures)
-        ai_summary = _generate_ai_weather_summary(city, state, daily_raw, target_language)
+        # AI Summary placeholder (fetched separately via /ai-advisory)
+        ai_summary = None  # Fetched separately via /ai-advisory
 
         return {
             "location": {"city": city, "state": state, "latitude": lat, "longitude": lon},
@@ -622,7 +620,7 @@ async def get_weather_dashboard(
                 "condition": "sunny",
                 "condition_text": "Clear Sky",
             },
-            "ai_summary": "Weather data temporarily unavailable. Continue normal farm activities and monitor local conditions.",
+            "ai_summary": None,  # Fetched separately via /ai-advisory
             "spraying_windows": [
                 {"block": "Morning", "time_range": "6 AM - 12 PM", "status": "GREEN", "label": "Optimal", "avg_temp": 28, "max_wind_kmh": 8, "max_precip_pct": 10},
                 {"block": "Afternoon", "time_range": "12 PM - 6 PM", "status": "YELLOW", "label": "High Evaporation Risk", "avg_temp": 36, "max_wind_kmh": 12, "max_precip_pct": 15},
@@ -636,3 +634,50 @@ async def get_weather_dashboard(
             },
             "forecast_7day": fallback_forecast,
         }
+
+
+@router.get("/ai-advisory")
+@limiter.limit("10/minute")
+async def get_ai_advisory(
+    request: Request,
+    lat: float = DEFAULT_LAT,
+    lon: float = DEFAULT_LON,
+    city: str = DEFAULT_CITY,
+    state: str = DEFAULT_STATE,
+):
+    """
+    AI-powered agricultural weather advisory (Gemini).
+
+    Separated from /dashboard so the main weather data loads instantly
+    while the AI summary streams in asynchronously.
+    """
+    try:
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "daily": (
+                "temperature_2m_max,temperature_2m_min,"
+                "precipitation_probability_max,weather_code"
+            ),
+            "timezone": "Asia/Kolkata",
+            "forecast_days": 7,
+        }
+
+        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+            response = await client.get(OPEN_METEO_URL, params=params)
+            response.raise_for_status()
+            raw = response.json()
+
+        daily_raw = raw.get("daily", {})
+
+        # Extract requested language for AI
+        accept_lang = request.headers.get("Accept-Language", "en").lower()
+        target_language = "Hindi (using natural, conversational Devanagari script)" if "hi" in accept_lang else "English"
+
+        summary = _generate_ai_weather_summary(city, state, daily_raw, target_language)
+
+        return {"ai_summary": summary}
+
+    except Exception as e:
+        logger.error(f"AI advisory endpoint failed: {e}")
+        return {"ai_summary": "Weather advisory temporarily unavailable. Continue normal farm activities."}

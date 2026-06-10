@@ -25,6 +25,14 @@ class CropCycle(Base):
         String(20), nullable=False, index=True, default="ACTIVE",
         comment="ACTIVE | HARVESTED",
     )
+    cumulative_gdd = Column(
+        Integer, nullable=False, default=0,
+        comment="Cumulative Growing Degree Days since planting"
+    )
+    gdd_last_updated = Column(
+        Date, nullable=True,
+        comment="Date when cumulative_gdd was last updated"
+    )
 
     created_at = Column(
         DateTime, nullable=False,

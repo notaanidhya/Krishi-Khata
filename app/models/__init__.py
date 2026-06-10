@@ -10,9 +10,12 @@ from app.models.laborer import Laborer
 from app.models.mandi import MandiPriceHistory
 from app.models.crop import CropCycle, CropLog
 from app.models.chat import CommunityMessage
+from app.models.ai_cache import AICropTaskCache
+from app.models.dynamic_crop import DynamicCrop
 
 __all__ = [
     "Base", "User", "Farm", "KhataTransaction", "Laborer",
-    "SavedMandi", "MandiPriceHistory",
-    "CropCycle", "CropLog", "CommunityMessage",
+    "MandiPriceHistory",
+    "CropCycle", "CropLog", "CommunityMessage", "AICropTaskCache",
+    "DynamicCrop"
 ]

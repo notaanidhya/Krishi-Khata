@@ -12,7 +12,7 @@ Key endpoints:
 import json
 import logging
 from datetime import date
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, BackgroundTasks
 from pydantic import BaseModel, Field
 from app.main import limiter
 from sqlalchemy.orm import Session, joinedload
@@ -25,7 +25,10 @@ from app.schemas.crop import (
     CropLogResponse,
     CropCycleResponse,
 )
-from app.utils.crop_stages import calculate_stage, get_crop_presets
+from app.utils.crop_stages import calculate_stage, calculate_stage_by_gdd, get_crop_presets
+from app.utils.gdd_calculator import fetch_historical_gdd, get_todays_gdd
+from app.utils.ai_validator import async_validate_crop
+from app.models.ai_cache import AICropTaskCache
 from app.models.farm import Farm
 from app.schemas.farm import FarmCreate, FarmResponse
 from app.config import settings
@@ -127,14 +130,21 @@ def _verify_crop_ownership(crop_id: int, user_id: str, db: Session) -> CropCycle
     return crop
 
 
-def _crop_to_response(crop: CropCycle) -> dict:
+async def _crop_to_response(crop: CropCycle) -> dict:
     """Convert a CropCycle ORM object to a response dict
-    with dynamically calculated stage fields."""
-    current_stage, days = calculate_stage(crop.crop_name, crop.planting_date)
+    with dynamically calculated stage fields using GDD."""
+    days = (date.today() - crop.planting_date).days
+    
+    # Add today's live GDD (forecast) to the cumulative total
+    today_gdd = await get_todays_gdd(crop.farm.latitude, crop.farm.longitude)
+    total_gdd = crop.cumulative_gdd + today_gdd
+    
+    current_stage = calculate_stage_by_gdd(crop.crop_name, total_gdd)
 
     d = crop.to_dict()
     d["days_since_planting"] = days
     d["current_stage"] = current_stage
+    d["cumulative_gdd"] = total_gdd
     d["logs"] = [log.to_dict() for log in (crop.logs or [])]
     return d
 
@@ -199,6 +209,7 @@ async def create_farm(
 async def create_crop(
     farm_id: int,
     payload: CropCycleCreate,
+    background_tasks: BackgroundTasks,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -208,11 +219,21 @@ async def create_crop(
     """
     _verify_farm_ownership(farm_id, current_user.get("uid"), db)
 
+    farm = db.query(Farm).get(farm_id)
+    
+    # Calculate initial cumulative GDD from planting date to yesterday
+    yesterday = date.today()
+    initial_gdd = 0.0
+    if payload.planting_date < yesterday:
+        initial_gdd = await fetch_historical_gdd(farm.latitude, farm.longitude, payload.planting_date, yesterday)
+
     crop = CropCycle(
         farm_id=farm_id,
         crop_name=payload.crop_name,
         planting_date=payload.planting_date,
         status="ACTIVE",
+        cumulative_gdd=int(initial_gdd),
+        gdd_last_updated=yesterday if payload.planting_date < yesterday else payload.planting_date
     )
     db.add(crop)
     db.commit()
@@ -220,7 +241,11 @@ async def create_crop(
 
     # Load logs relationship (empty for new crop)
     crop.logs = []
-    return _crop_to_response(crop)
+    
+    # Trigger background AI validation for custom crops
+    background_tasks.add_task(async_validate_crop, crop.id, crop.crop_name)
+
+    return await _crop_to_response(crop)
 
 
 # ── Crop Cycle — Get Active Crop ────────────────────────────────
@@ -251,7 +276,7 @@ async def get_active_crop(
             detail="No active crop for this farm",
         )
 
-    return _crop_to_response(crop)
+    return await _crop_to_response(crop)
 
 
 # ── Crop Cycle — Delete ────────────────────────────────────────
@@ -293,7 +318,10 @@ async def list_crops(
         query = query.filter(CropCycle.status == status_filter)
 
     crops = query.order_by(CropCycle.planting_date.desc()).all()
-    return [_crop_to_response(c) for c in crops]
+    responses = []
+    for c in crops:
+        responses.append(await _crop_to_response(c))
+    return responses
 
 
 
@@ -395,7 +423,7 @@ async def harvest_crop(
         .first()
     )
 
-    return _crop_to_response(crop_with_logs)
+    return await _crop_to_response(crop_with_logs)
 
 
 # ── Crop Diary Logs ────────────────────────────────────────────
@@ -441,3 +469,125 @@ async def add_crop_log(
     db.refresh(new_log)
 
     return new_log.to_dict()
+
+
+# ── Dynamic AI Tasks ───────────────────────────────────────────
+@router.get("/crops/{crop_id}/tasks")
+async def get_crop_tasks(
+    request: Request,
+    crop_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get dynamic crop schedule tasks based on current stage and weather."""
+    crop = _verify_crop_ownership(crop_id, current_user.get("uid"), db)
+    
+    # Calculate current stage using GDD
+    today_gdd = await get_todays_gdd(crop.farm.latitude, crop.farm.longitude)
+    total_gdd = crop.cumulative_gdd + today_gdd
+    current_stage = calculate_stage_by_gdd(crop.crop_name, total_gdd)
+    
+    # Simple weather profile estimation based on today's GDD (which roughly correlates to average temp)
+    if today_gdd > 18:
+        weather_profile = "HOT"
+    elif today_gdd < 10:
+        weather_profile = "COOL"
+    else:
+        weather_profile = "MODERATE"
+        
+    # Check Cache
+    cached = db.query(AICropTaskCache).filter(
+        AICropTaskCache.crop_name == crop.crop_name,
+        AICropTaskCache.stage == current_stage,
+        AICropTaskCache.weather_profile == weather_profile
+    ).first()
+    
+    if cached:
+        return {"tasks": cached.tasks_json, "source": "cache", "stage": current_stage}
+        
+    # Generate new tasks using Gemini
+    accept_lang = request.headers.get("Accept-Language", "en").lower()
+    target_language = "Hindi (using Devanagari script)" if "hi" in accept_lang else "English"
+    
+    system_prompt = (
+        f"You are an expert Indian agronomist. Generate a timeline of exactly 6-8 key farming milestones "
+        f"for {crop.crop_name}. Based on the current stage '{current_stage}' and weather profile '{weather_profile}', "
+        f"determine the status of each milestone. "
+        f"Output ONLY a valid JSON array of objects, with no markdown fences. "
+        f'Each object must have "task" (string), "icon" (string, a single emoji), '
+        f'"day" (integer, expected days after planting), and "status" (string: exactly one of "completed", "current", or "upcoming"). '
+        f"Ensure the tasks are written in {target_language}. Tailor the 'current' tasks to the {weather_profile} weather."
+    )
+    
+    tasks = []
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        model = genai.GenerativeModel("gemini-flash-latest", system_instruction=system_prompt)
+        
+        response = model.generate_content(f"Generate tasks for {crop.crop_name} in {current_stage} stage.")
+        response_text = response.text.strip()
+        
+        if response_text.startswith("```"):
+            lines = response_text.split("\\n")
+            lines = [l for l in lines if not l.strip().startswith("```")]
+            response_text = "\\n".join(lines).strip()
+            
+        tasks = json.loads(response_text)
+        
+        # Save to cache
+        new_cache = AICropTaskCache(
+            crop_name=crop.crop_name,
+            stage=current_stage,
+            weather_profile=weather_profile,
+            tasks_json=tasks
+        )
+        db.add(new_cache)
+        db.commit()
+        
+    except Exception as e:
+        logger.error(f"Failed to generate dynamic tasks: {e}")
+        # Fallback to empty tasks or basic
+        tasks = [{"task": f"Check {crop.crop_name} health", "icon": "👀"}]
+        
+    return {"tasks": tasks, "source": "ai", "stage": current_stage}
+
+
+# ── About Crop ─────────────────────────────────────────────────
+@router.get("/crops/{crop_id}/about")
+async def get_crop_about(
+    request: Request,
+    crop_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Generate a short AI summary about the crop factoring in live weather/GDD."""
+    crop = _verify_crop_ownership(crop_id, current_user.get("uid"), db)
+    
+    today_gdd = await get_todays_gdd(crop.farm.latitude, crop.farm.longitude)
+    total_gdd = crop.cumulative_gdd + today_gdd
+    current_stage = calculate_stage_by_gdd(crop.crop_name, total_gdd)
+    
+    accept_lang = request.headers.get("Accept-Language", "en").lower()
+    target_language = "Hindi (using Devanagari script)" if "hi" in accept_lang else "English"
+    
+    system_prompt = (
+        f"You are an expert Indian agronomist. Write exactly 2-3 short, engaging sentences "
+        f"about the '{crop.crop_name}' crop which is currently in the '{current_stage}' stage. "
+        f"Mention a quick tip or fact relevant to its current stage. "
+        f"Always write in {target_language}. Do not use markdown."
+    )
+    
+    try:
+        if not settings.GEMINI_API_KEY:
+            return {"about": f"This is a {crop.crop_name} crop in the {current_stage} stage."}
+            
+        import google.generativeai as genai
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        model = genai.GenerativeModel("gemini-flash-latest", system_instruction=system_prompt)
+        
+        response = model.generate_content(f"Tell me about {crop.crop_name}.")
+        return {"about": response.text.strip()}
+    except Exception as e:
+        logger.error(f"Failed to generate about crop: {e}")
+        return {"about": f"{crop.crop_name} is currently in the {current_stage} stage."}
