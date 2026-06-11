@@ -43,6 +43,10 @@ class CropCycle(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+    ai_validation_failed = Column(
+        Boolean, nullable=True, default=False,
+        comment="Whether the background AI validation failed for this crop"
+    )
 
     # ── Relationships ──────────────────────────────────────────────
     farm = relationship("Farm", back_populates="crop_cycles")
@@ -64,6 +68,7 @@ class CropCycle(Base):
             "status": self.status,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
+            "ai_validation_failed": self.ai_validation_failed,
         }
 
 

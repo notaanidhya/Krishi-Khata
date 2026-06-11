@@ -146,7 +146,8 @@ async def _crop_to_response(crop: CropCycle) -> dict:
     d["days_since_planting"] = days
     d["current_stage"] = current_stage
     d["cumulative_gdd"] = total_gdd
-    d["is_processing"] = crop.crop_name not in known_crops
+    d["is_processing"] = (crop.crop_name not in known_crops) and not crop.ai_validation_failed
+    d["validation_failed"] = bool(crop.ai_validation_failed)
     d["logs"] = [log.to_dict() for log in (crop.logs or [])]
     return d
 
@@ -245,6 +246,29 @@ async def create_crop(
     crop.logs = []
     
     # Trigger background AI validation for custom crops
+    background_tasks.add_task(async_validate_crop, crop.id, crop.crop_name)
+
+    return await _crop_to_response(crop)
+
+# ── Crop Cycle — Retry Validation ──────────────────────────────
+@router.post(
+    "/crops/{crop_id}/retry_validation",
+    response_model=CropCycleResponse,
+)
+async def retry_crop_validation(
+    crop_id: int,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Retry AI validation for a crop that failed processing."""
+    crop = _verify_crop_ownership(crop_id, current_user.get("uid"), db)
+
+    # Reset the failed flag
+    crop.ai_validation_failed = False
+    db.commit()
+
+    # Re-trigger background task
     background_tasks.add_task(async_validate_crop, crop.id, crop.crop_name)
 
     return await _crop_to_response(crop)

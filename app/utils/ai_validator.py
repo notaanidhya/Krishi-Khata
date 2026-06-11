@@ -98,8 +98,20 @@ async def async_validate_crop(crop_id: int, crop_name: str):
                 )
                 db.add(new_dynamic)
             db.commit()
+            
+        else:
+            logger.warning(f"Unknown status '{status}' for '{crop_name}'")
+            crop_cycle.ai_validation_failed = True
+            db.commit()
 
     except Exception as e:
         logger.error(f"Crop validation failed for '{crop_name}': {e}")
+        try:
+            crop_cycle = db.query(CropCycle).filter(CropCycle.id == crop_id).first()
+            if crop_cycle:
+                crop_cycle.ai_validation_failed = True
+                db.commit()
+        except Exception as inner_e:
+            logger.error(f"Failed to set validation_failed flag: {inner_e}")
     finally:
         db.close()

@@ -60,6 +60,7 @@ class CropCycleResponse(BaseModel):
     current_stage: str
     cumulative_gdd: float
     is_processing: bool
+    validation_failed: bool = False
     created_at: str
     updated_at: str
     logs: List[CropLogResponse] = []
