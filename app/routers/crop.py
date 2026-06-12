@@ -267,8 +267,15 @@ async def retry_crop_validation(
     """Retry AI validation for a crop that failed processing."""
     crop = _verify_crop_ownership(crop_id, current_user.get("uid"), db)
 
-    # Reset the failed flag
+    # Reset both flags — ai_validated must also be cleared so the
+    # processing badge re-appears while the background task runs
     crop.ai_validation_failed = False
+    crop.ai_validated = False
+
+    # Clear stale task cache so the schedule regenerates after successful validation
+    db.query(AICropTaskCache).filter(
+        AICropTaskCache.crop_name == crop.crop_name
+    ).delete()
     db.commit()
 
     # Re-trigger background task
@@ -511,6 +518,9 @@ async def get_crop_tasks(
     """Get dynamic crop schedule tasks based on current stage and weather."""
     crop = _verify_crop_ownership(crop_id, current_user.get("uid"), db)
     
+    # Calculate days since planting — used for status override and prompt
+    days_since_planting = (date.today() - crop.planting_date).days
+
     # Calculate current stage using GDD
     today_gdd = await get_todays_gdd(crop.farm.latitude, crop.farm.longitude)
     total_gdd = crop.cumulative_gdd + today_gdd
@@ -529,6 +539,25 @@ async def get_crop_tasks(
     lang_code = "hi" if "hi" in accept_lang else "en"
     target_language = "Hindi (using Devanagari script)" if lang_code == "hi" else "English"
 
+    def _recalculate_status(tasks: list, days: int) -> list:
+        """Override AI-generated status with server-side calculation based on
+        actual days since planting, so completion marks are always accurate."""
+        sorted_tasks = sorted(tasks, key=lambda t: t.get('day', 0))
+        found_current = False
+        for task in sorted_tasks:
+            day = task.get('day', 0)
+            if day < days:
+                task['status'] = 'completed'
+            elif not found_current:
+                task['status'] = 'current'
+                found_current = True
+            else:
+                task['status'] = 'upcoming'
+        # Edge case: if all tasks are past, mark the last one as current
+        if not found_current and sorted_tasks:
+            sorted_tasks[-1]['status'] = 'current'
+        return sorted_tasks
+
     # Check Cache — include language so Hindi/English responses are stored separately
     cached = db.query(AICropTaskCache).filter(
         AICropTaskCache.crop_name == crop.crop_name,
@@ -538,18 +567,22 @@ async def get_crop_tasks(
     ).first()
     
     if cached:
-        return {"tasks": cached.tasks_json, "source": "cache", "stage": current_stage}
+        # Recalculate status from cache so it stays accurate as days progress
+        tasks = _recalculate_status(list(cached.tasks_json), days_since_planting)
+        return {"tasks": tasks, "source": "cache", "stage": current_stage}
         
     # Generate new tasks using Gemini
     
     system_prompt = (
         f"You are an expert Indian agronomist. Generate a timeline of exactly 6-8 key farming milestones "
-        f"for {crop.crop_name}. Based on the current stage '{current_stage}' and weather profile '{weather_profile}', "
-        f"determine the status of each milestone. "
+        f"for {crop.crop_name} over its full growing cycle. "
+        f"The crop was planted {days_since_planting} days ago and is currently in the '{current_stage}' stage "
+        f"with a '{weather_profile}' weather profile. "
+        f"Assign realistic cumulative 'day' values (days after planting date) for each milestone across the full crop lifecycle. "
         f"Output ONLY a valid JSON array of objects, with no markdown fences. "
         f'Each object must have "task" (string), "icon" (string, a single emoji), '
-        f'"day" (integer, expected days after planting), and "status" (string: exactly one of "completed", "current", or "upcoming"). '
-        f"Ensure the tasks are written in {target_language}. Tailor the 'current' tasks to the {weather_profile} weather."
+        f'"day" (integer, cumulative days after planting for that milestone), and "status" (string: any value, it will be recalculated). '
+        f"Ensure the tasks are written in {target_language}."
     )
     
     tasks = []
@@ -558,17 +591,20 @@ async def get_crop_tasks(
         genai.configure(api_key=settings.GEMINI_API_KEY)
         model = genai.GenerativeModel("gemini-flash-latest", system_instruction=system_prompt)
         
-        response = model.generate_content(f"Generate tasks for {crop.crop_name} in {current_stage} stage.")
+        response = model.generate_content(
+            f"Generate full lifecycle milestones for {crop.crop_name}. "
+            f"Current day: {days_since_planting}. Stage: {current_stage}."
+        )
         response_text = response.text.strip()
         
         if response_text.startswith("```"):
-            lines = response_text.split("\\n")
+            lines = response_text.split("\n")
             lines = [l for l in lines if not l.strip().startswith("```")]
-            response_text = "\\n".join(lines).strip()
+            response_text = "\n".join(lines).strip()
             
         tasks = json.loads(response_text)
         
-        # Save to cache — include language so Hindi/English are stored separately
+        # Save raw tasks to cache (without status — it will be recalculated per request)
         new_cache = AICropTaskCache(
             crop_name=crop.crop_name,
             stage=current_stage,
@@ -581,9 +617,10 @@ async def get_crop_tasks(
         
     except Exception as e:
         logger.error(f"Failed to generate dynamic tasks: {e}")
-        # Fallback to empty tasks or basic
-        tasks = [{"task": f"Check {crop.crop_name} health", "icon": "👀"}]
-        
+        tasks = [{"task": f"Check {crop.crop_name} health", "icon": "👀", "day": 0, "status": "current"}]
+
+    # Always override status with server-side calculation
+    tasks = _recalculate_status(tasks, days_since_planting)
     return {"tasks": tasks, "source": "ai", "stage": current_stage}
 
 
