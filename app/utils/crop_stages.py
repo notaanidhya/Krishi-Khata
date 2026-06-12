@@ -155,8 +155,12 @@ def get_stages_for_crop(crop_name: str) -> dict[str, int]:
 
 
 def get_gdd_stages_for_crop(crop_name: str) -> dict[str, float]:
-    """Return GDD stage intervals for a crop, assuming ~15 GDD/day from the original day map."""
-    stages_in_days = CROP_STAGE_MAP.get(crop_name, DEFAULT_STAGES)
+    """Return GDD stage intervals for a crop.
+    Uses get_stages_for_crop() which checks both the hardcoded CROP_STAGE_MAP
+    and the DynamicCrop table, so dynamically-learned crops use the correct
+    AI-generated boundaries instead of DEFAULT_STAGES.
+    """
+    stages_in_days = get_stages_for_crop(crop_name)
     return {k: v * 15.0 for k, v in stages_in_days.items()}
 
 

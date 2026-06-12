@@ -78,12 +78,14 @@ async def async_validate_crop(crop_id: int, crop_name: str):
         elif status == "corrected" and standard_name in known_crops:
             logger.info(f"Correcting crop '{crop_name}' -> '{standard_name}'")
             crop_cycle.crop_name = standard_name
+            crop_cycle.ai_validated = True
             db.commit()
 
         elif status == "new" and standard_name:
             logger.info(f"Learned new crop: '{standard_name}' from '{crop_name}'")
             # Update the crop cycle to the clean standard name
             crop_cycle.crop_name = standard_name
+            crop_cycle.ai_validated = True
             
             # Check if we already have it in dynamic crops (maybe added by concurrent request)
             existing_dynamic = db.query(DynamicCrop).filter(DynamicCrop.crop_name == standard_name).first()

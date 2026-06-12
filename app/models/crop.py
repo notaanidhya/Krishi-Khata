@@ -47,6 +47,10 @@ class CropCycle(Base):
         Boolean, nullable=True, default=False,
         comment="Whether the background AI validation failed for this crop"
     )
+    ai_validated = Column(
+        Boolean, nullable=True, default=False,
+        comment="Whether the background AI validation completed successfully"
+    )
 
     # ── Relationships ──────────────────────────────────────────────
     farm = relationship("Farm", back_populates="crop_cycles")
@@ -69,6 +73,7 @@ class CropCycle(Base):
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             "ai_validation_failed": self.ai_validation_failed,
+            "ai_validated": self.ai_validated,
         }
 
 

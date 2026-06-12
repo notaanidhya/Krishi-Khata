@@ -146,7 +146,10 @@ async def _crop_to_response(crop: CropCycle) -> dict:
     d["days_since_planting"] = days
     d["current_stage"] = current_stage
     d["cumulative_gdd"] = total_gdd
-    d["is_processing"] = (crop.crop_name not in known_crops) and not crop.ai_validation_failed
+    # A crop is 'processing' while background AI validation is still pending:
+    # not yet validated AND not a known-preset crop AND not failed.
+    is_custom_crop = crop.crop_name not in known_crops
+    d["is_processing"] = is_custom_crop and not crop.ai_validated and not crop.ai_validation_failed
     d["validation_failed"] = bool(crop.ai_validation_failed)
     d["logs"] = [log.to_dict() for log in (crop.logs or [])]
     return d
@@ -521,19 +524,23 @@ async def get_crop_tasks(
     else:
         weather_profile = "MODERATE"
         
-    # Check Cache
+    # Detect requested language for AI
+    accept_lang = request.headers.get("Accept-Language", "en").lower()
+    lang_code = "hi" if "hi" in accept_lang else "en"
+    target_language = "Hindi (using Devanagari script)" if lang_code == "hi" else "English"
+
+    # Check Cache — include language so Hindi/English responses are stored separately
     cached = db.query(AICropTaskCache).filter(
         AICropTaskCache.crop_name == crop.crop_name,
         AICropTaskCache.stage == current_stage,
-        AICropTaskCache.weather_profile == weather_profile
+        AICropTaskCache.weather_profile == weather_profile,
+        AICropTaskCache.language == lang_code,
     ).first()
     
     if cached:
         return {"tasks": cached.tasks_json, "source": "cache", "stage": current_stage}
         
     # Generate new tasks using Gemini
-    accept_lang = request.headers.get("Accept-Language", "en").lower()
-    target_language = "Hindi (using Devanagari script)" if "hi" in accept_lang else "English"
     
     system_prompt = (
         f"You are an expert Indian agronomist. Generate a timeline of exactly 6-8 key farming milestones "
@@ -561,11 +568,12 @@ async def get_crop_tasks(
             
         tasks = json.loads(response_text)
         
-        # Save to cache
+        # Save to cache — include language so Hindi/English are stored separately
         new_cache = AICropTaskCache(
             crop_name=crop.crop_name,
             stage=current_stage,
             weather_profile=weather_profile,
+            language=lang_code,
             tasks_json=tasks
         )
         db.add(new_cache)

@@ -9,6 +9,7 @@ class AICropTaskCache(Base):
     crop_name = Column(String(100), nullable=False, index=True)
     stage = Column(String(100), nullable=False, index=True)
     weather_profile = Column(String(50), nullable=False, index=True)
+    language = Column(String(10), nullable=False, default="en", index=True)
     
     tasks_json = Column(JSON, nullable=False)
 
