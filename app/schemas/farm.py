@@ -1,14 +1,9 @@
-"""
-Farm Pydantic schemas — request/response validation for farm CRUD.
-"""
-
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
 
 class FarmCreate(BaseModel):
-    """Schema for creating a new farm."""
     name: str = Field(..., min_length=1, max_length=150)
     area_acres: float = Field(..., gt=0)
     state: str = Field(..., min_length=1, max_length=100)
@@ -20,7 +15,6 @@ class FarmCreate(BaseModel):
 
 
 class FarmResponse(BaseModel):
-    """Schema for farm response."""
     id: int
     user_id: str
     name: str

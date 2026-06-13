@@ -1,18 +1,10 @@
-"""
-Pydantic schemas for Dashboard — Weather & Mandi data validation.
-"""
-
 from datetime import date, datetime
 from typing import Optional, List
 from pydantic import BaseModel, Field
 
 
-# ═══════════════════════════════════════════════════════════════
 #  WEATHER SCHEMAS
-# ═══════════════════════════════════════════════════════════════
-
 class WeatherLocation(BaseModel):
-    """Geographic location for weather data."""
     latitude: float
     longitude: float
     city: str
@@ -20,7 +12,6 @@ class WeatherLocation(BaseModel):
 
 
 class CurrentWeather(BaseModel):
-    """Current weather conditions."""
     temperature_c: float
     feels_like_c: float
     humidity_pct: float = Field(..., ge=0, le=100)
@@ -34,7 +25,6 @@ class CurrentWeather(BaseModel):
 
 
 class DailyForecast(BaseModel):
-    """Single day weather forecast."""
     date: str
     day_name: str
     temp_max: float
@@ -49,33 +39,35 @@ class DailyForecast(BaseModel):
 
 
 class WeatherResponse(BaseModel):
-    """Full weather response — current conditions + 7-day forecast."""
     location: WeatherLocation
     current: CurrentWeather
     daily: List[DailyForecast]
 
 
-# ═══════════════════════════════════════════════════════════════
 #  MANDI PRICE SCHEMAS
-# ═══════════════════════════════════════════════════════════════
-
 class MandiPrice(BaseModel):
-    """Single commodity price entry from a mandi."""
     commodity: str
     variety: str
-    mandi: str
-    state: str
-    min_price: float = Field(..., ge=0, description="Minimum price in INR per quintal")
-    max_price: float = Field(..., ge=0, description="Maximum price in INR per quintal")
-    modal_price: float = Field(..., ge=0, description="Most common trading price")
-    previous_price: float = Field(..., ge=0, description="Previous day's modal price")
-    change_pct: float = Field(..., description="Percentage change from previous price")
-    unit: str = "quintal"
+    min_price: float
+    max_price: float
+    modal_price: float
     arrival_date: str
-    arrival_tonnes: float = Field(..., ge=0)
 
+
+class DashboardMandiResponse(BaseModel):
+    district: str
+    date: str
+    prices: List[MandiPrice]
 
 class MandiPricesResponse(BaseModel):
-    """Response wrapper for mandi prices."""
     last_updated: str
     prices: List[MandiPrice]
+
+
+#  COMBINED DASHBOARD SCHEMA
+class FarmerDashboardResponse(BaseModel):
+    farm_id: int
+    farm_name: str
+    area_acres: float
+    weather: Optional[WeatherResponse] = None
+    mandi_prices: Optional[DashboardMandiResponse] = None

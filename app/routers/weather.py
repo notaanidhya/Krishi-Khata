@@ -15,6 +15,7 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from app.schemas.dashboard import WeatherResponse
 from app.main import limiter
+from cachetools import TTLCache
 
 import httpx
 
@@ -23,6 +24,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 MOCK_DIR = Path(__file__).resolve().parent.parent.parent / "mockdata"
+
+# ── Caches ─────────────────────────────────────────────────────
+dashboard_cache = TTLCache(maxsize=100, ttl=60 * 30)  # 30 mins
+advisory_cache = TTLCache(maxsize=100, ttl=60 * 60 * 6)  # 6 hours
 
 # ── Open-Meteo Configuration ───────────────────────────────────
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
@@ -463,20 +468,25 @@ def _generate_ai_weather_summary(city: str, state: str, daily_data: dict, target
         return _generate_advisory(cond, t_max, rain)
 
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        model = genai.GenerativeModel(
-            "gemini-flash-latest",
-            system_instruction=(
-                f"You are an expert Indian agronomist weather bot. "
-                f"The upcoming 7-day forecast for {city}, {state} predicts: {weather_summary}. "
-                f"Provide a hyper-concise 2-sentence summary warning the farmer of specific risks "
-                f"(heat stress, fungal risks due to humidity, harvesting logistics). "
-                f"You MUST respond natively in {target_language}. Avoid overly formal or academic terms; "
-                f"use vocabulary easily understood by a typical Indian farmer."
-            ),
+        from google import genai
+        from google.genai import types
+        
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents="Give me today's agricultural weather advisory.",
+            config=types.GenerateContentConfig(
+                system_instruction=(
+                    f"You are an expert Indian agronomist weather bot. "
+                    f"The upcoming 7-day forecast for {city}, {state} predicts: {weather_summary}. "
+                    f"Provide a hyper-concise 2-sentence summary warning the farmer of specific risks "
+                    f"(heat stress, fungal risks due to humidity, harvesting logistics). "
+                    f"You MUST respond natively in {target_language}. Avoid overly formal or academic terms; "
+                    f"use vocabulary easily understood by a typical Indian farmer."
+                ),
+            )
         )
-        response = model.generate_content("Give me today's agricultural weather advisory.")
         return response.text.strip()
     except Exception as e:
         logger.error(f"Gemini weather summary failed: {e}")
@@ -504,6 +514,10 @@ async def get_weather_dashboard(
     Returns AI summary, safe spraying windows, soil insights,
     and 7-day agricultural forecast for the given location.
     """
+    cache_key = f"{lat:.2f},{lon:.2f}"
+    if cache_key in dashboard_cache:
+        return dashboard_cache[cache_key]
+
     try:
         params = {
             "latitude": lat,
@@ -582,7 +596,7 @@ async def get_weather_dashboard(
         # AI Summary placeholder (fetched separately via /ai-advisory)
         ai_summary = None  # Fetched separately via /ai-advisory
 
-        return {
+        result = {
             "location": {"city": city, "state": state, "latitude": lat, "longitude": lon},
             "current": current,
             "ai_summary": ai_summary,
@@ -590,6 +604,8 @@ async def get_weather_dashboard(
             "soil_insights": soil_insights,
             "forecast_7day": forecast_7day,
         }
+        dashboard_cache[cache_key] = result
+        return result
 
     except Exception as e:
         logger.error(f"Weather dashboard failed: {e} — returning safe defaults")
@@ -651,6 +667,10 @@ async def get_ai_advisory(
     Separated from /dashboard so the main weather data loads instantly
     while the AI summary streams in asynchronously.
     """
+    cache_key = f"{lat:.2f},{lon:.2f}"
+    if cache_key in advisory_cache:
+        return advisory_cache[cache_key]
+
     try:
         params = {
             "latitude": lat,
@@ -676,8 +696,10 @@ async def get_ai_advisory(
 
         summary = _generate_ai_weather_summary(city, state, daily_raw, target_language)
 
-        return {"ai_summary": summary}
+        result = {"ai_summary": summary}
+        advisory_cache[cache_key] = result
+        return result
 
     except Exception as e:
-        logger.error(f"AI advisory endpoint failed: {e}")
-        return {"ai_summary": "Weather advisory temporarily unavailable. Continue normal farm activities."}
+        logger.error(f"AI advisory failed: {e}")
+        return {"ai_summary": "No AI Advisory available right now."}

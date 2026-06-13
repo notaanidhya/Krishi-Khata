@@ -20,11 +20,6 @@ mandi_cache = TTLCache(maxsize=100, ttl=14400)
 
 @cached(cache=mandi_cache)
 def fetch_mandi_prices(state: Optional[str] = None, district: Optional[str] = None, commodity: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Fetch mandi prices from data.gov.in API synchronously, caching the result.
-    This function blocks, so it should ideally be run in a threadpool if it's slow,
-    but FastAPI handles standard defs in a threadpool automatically.
-    """
     api_key = settings.DATAGOV_API_KEY
     if not api_key:
         logger.warning("DATAGOV_API_KEY is not set. Mandi API will fail or return empty.")
@@ -46,15 +41,20 @@ def fetch_mandi_prices(state: Optional[str] = None, district: Optional[str] = No
     try:
         with httpx.Client(timeout=30.0) as client:
             response = client.get(GOV_API_URL, params=params, headers=HEADERS)
-            response.raise_for_status()
-            data = response.json()
-            return data
+        response.raise_for_status()
+        data = response.json()
+        return data
+    except httpx.HTTPStatusError as e:
+        logger.error(f"HTTP error fetching mandi prices: {e.response.status_code} - {e}")
+        return {"records": [], "error": f"API Error: {e.response.status_code}"}
+    except httpx.RequestError as e:
+        logger.error(f"Network error fetching mandi prices: {e}")
+        return {"records": [], "error": "Network Error"}
     except Exception as e:
-        logger.error(f"Error fetching mandi prices: {e}")
+        logger.error(f"Unexpected error fetching mandi prices: {e}")
         return {"records": [], "error": str(e)}
 
 def normalize_date(date_str: str) -> str:
-    """Normalize date_str to YYYY-MM-DD format."""
     if not date_str:
         return ""
     if "-" in date_str and len(date_str) == 10:
@@ -68,7 +68,6 @@ def normalize_date(date_str: str) -> str:
     return date_str
 
 def upsert_prices_to_db(records: list):
-    """Upserts prices into MandiPriceHistory using a new DB session."""
     if not records:
         return
         
@@ -149,12 +148,8 @@ def upsert_prices_to_db(records: list):
         db.close()
 
 
-# ════════════════════════════════════════════════════════════════
 #  JIT HISTORICAL BACKFILL
-# ════════════════════════════════════════════════════════════════
-
 def _parse_date_safe(date_str: str) -> Optional[datetime]:
-    """Try to parse a normalized YYYY-MM-DD string into a datetime."""
     try:
         return datetime.strptime(date_str, "%Y-%m-%d")
     except (ValueError, TypeError):
@@ -167,24 +162,6 @@ def fetch_historical_mandi_prices(
     commodity: str,
     days_back: int = 30,
 ) -> int:
-    """
-    JIT historical backfill — pulls commodity price history from data.gov.in
-    and bulk-upserts into MandiPriceHistory.
-
-    The data.gov.in Agmarknet daily-price resource does NOT support date-range
-    query filters.  The API returns records sorted by most-recent arrival date
-    when given State/District/Commodity filters.  We therefore:
-
-      1. Fetch a large batch (limit=1000) filtered by state+district+commodity.
-      2. Normalize every Arrival_Date to YYYY-MM-DD.
-      3. Client-side filter: keep only records whose date falls within the
-         last `days_back` days from today.
-      4. Bulk-upsert the filtered set into MandiPriceHistory via the existing
-         upsert helper (which handles deduplication by the table's unique
-         constraint on commodity+state+district+arrival_date).
-
-    Returns the count of records that were upserted.
-    """
     api_key = settings.DATAGOV_API_KEY
     if not api_key:
         logger.warning("DATAGOV_API_KEY not set — skipping historical backfill.")
@@ -216,6 +193,12 @@ def fetch_historical_mandi_prices(
                 # If we received fewer than the limit, there are no more pages
                 if len(batch) < 1000:
                     break
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Historical backfill API error: {e.response.status_code} - {e}")
+        return 0
+    except httpx.RequestError as e:
+        logger.error(f"Historical backfill Network error: {e}")
+        return 0
     except Exception as e:
         logger.error(f"Historical backfill API error: {e}")
         return 0
@@ -226,7 +209,6 @@ def fetch_historical_mandi_prices(
         )
         return 0
 
-    # ── Client-side date-range filter ────────────────────────────────
     cutoff = datetime.now() - timedelta(days=days_back)
     filtered: List[dict] = []
     for r in all_records:
@@ -242,7 +224,6 @@ def fetch_historical_mandi_prices(
         f"{commodity}/{district}/{state}"
     )
 
-    # ── Bulk-upsert into DB ──────────────────────────────────────────
     if filtered:
         upsert_prices_to_db(filtered)
 

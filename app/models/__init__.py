@@ -12,10 +12,11 @@ from app.models.crop import CropCycle, CropLog
 from app.models.chat import CommunityMessage
 from app.models.ai_cache import AICropTaskCache
 from app.models.dynamic_crop import DynamicCrop
+from app.models.crop_data_cache import CropDataCache
 
 __all__ = [
     "Base", "User", "Farm", "KhataTransaction", "Laborer",
     "MandiPriceHistory",
     "CropCycle", "CropLog", "CommunityMessage", "AICropTaskCache",
-    "DynamicCrop"
+    "DynamicCrop", "CropDataCache"
 ]

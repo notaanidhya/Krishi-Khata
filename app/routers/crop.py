@@ -28,7 +28,7 @@ from app.schemas.crop import (
 from app.utils.crop_stages import calculate_stage, calculate_stage_by_gdd, get_crop_presets
 from app.utils.gdd_calculator import fetch_historical_gdd, get_todays_gdd
 from app.utils.ai_validator import async_validate_crop
-from app.models.ai_cache import AICropTaskCache
+from app.models.crop_data_cache import CropDataCache
 from app.models.farm import Farm
 from app.schemas.farm import FarmCreate, FarmResponse
 from app.config import settings
@@ -65,17 +65,20 @@ def _analyze_with_gemini(raw_content: str, crop_name: str) -> dict | None:
         return None
 
     try:
-        import google.generativeai as genai
+        from google import genai
+        from google.genai import types
 
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        model = genai.GenerativeModel(
-            "gemini-flash-latest",
-            system_instruction=GEMINI_SYSTEM_PROMPT,
-        )
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
         user_prompt = f"Crop: {crop_name}\nFarmer's observation: {raw_content}"
 
-        response = model.generate_content(user_prompt)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=user_prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=GEMINI_SYSTEM_PROMPT,
+            )
+        )
         response_text = response.text.strip()
 
         # Strip markdown code fences if Gemini wraps the JSON
@@ -272,10 +275,6 @@ async def retry_crop_validation(
     crop.ai_validation_failed = False
     crop.ai_validated = False
 
-    # Clear stale task cache so the schedule regenerates after successful validation
-    db.query(AICropTaskCache).filter(
-        AICropTaskCache.crop_name == crop.crop_name
-    ).delete()
     db.commit()
 
     # Re-trigger background task
@@ -406,15 +405,18 @@ async def ask_crop_ai(
                 "advice": "AI Agronomist is currently offline. Please consult standard local farming practices."
             }
 
-        import google.generativeai as genai
+        from google import genai
+        from google.genai import types
 
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        model = genai.GenerativeModel(
-            "gemini-flash-latest",
-            system_instruction=system_prompt,
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=payload.query,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+            )
         )
-
-        response = model.generate_content(payload.query)
         answer = response.text.strip()
 
     except Exception as e:
@@ -507,7 +509,26 @@ async def add_crop_log(
     return new_log.to_dict()
 
 
-# ── Dynamic AI Tasks ───────────────────────────────────────────
+# ── Helpers ─────────────────────────────────────────────────────
+def _recalculate_status(tasks: list, days: int) -> list:
+    """Override status based on actual days since planting."""
+    sorted_tasks = sorted(tasks, key=lambda t: t.get('day', 0))
+    found_current = False
+    for task in sorted_tasks:
+        day = task.get('day', 0)
+        if day < days:
+            task['status'] = 'completed'
+        elif not found_current:
+            task['status'] = 'current'
+            found_current = True
+        else:
+            task['status'] = 'upcoming'
+    if not found_current and sorted_tasks:
+        sorted_tasks[-1]['status'] = 'current'
+    return sorted_tasks
+
+
+# ── Crop Schedule (from CropDataCache) ─────────────────────────
 @router.get("/crops/{crop_id}/tasks")
 async def get_crop_tasks(
     request: Request,
@@ -515,116 +536,33 @@ async def get_crop_tasks(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Get dynamic crop schedule tasks based on current stage and weather."""
+    """Get crop schedule tasks from CropDataCache. No Gemini calls."""
     crop = _verify_crop_ownership(crop_id, current_user.get("uid"), db)
     
-    # Calculate days since planting — used for status override and prompt
     days_since_planting = (date.today() - crop.planting_date).days
-
+    
     # Calculate current stage using GDD
     today_gdd = await get_todays_gdd(crop.farm.latitude, crop.farm.longitude)
     total_gdd = crop.cumulative_gdd + today_gdd
     current_stage = calculate_stage_by_gdd(crop.crop_name, total_gdd)
-    
-    # Simple weather profile estimation based on today's GDD (which roughly correlates to average temp)
-    if today_gdd > 18:
-        weather_profile = "HOT"
-    elif today_gdd < 10:
-        weather_profile = "COOL"
-    else:
-        weather_profile = "MODERATE"
-        
-    # Detect requested language for AI
-    accept_lang = request.headers.get("Accept-Language", "en").lower()
-    lang_code = "hi" if "hi" in accept_lang else "en"
-    target_language = "Hindi (using Devanagari script)" if lang_code == "hi" else "English"
 
-    def _recalculate_status(tasks: list, days: int) -> list:
-        """Override AI-generated status with server-side calculation based on
-        actual days since planting, so completion marks are always accurate."""
-        sorted_tasks = sorted(tasks, key=lambda t: t.get('day', 0))
-        found_current = False
-        for task in sorted_tasks:
-            day = task.get('day', 0)
-            if day < days:
-                task['status'] = 'completed'
-            elif not found_current:
-                task['status'] = 'current'
-                found_current = True
-            else:
-                task['status'] = 'upcoming'
-        # Edge case: if all tasks are past, mark the last one as current
-        if not found_current and sorted_tasks:
-            sorted_tasks[-1]['status'] = 'current'
-        return sorted_tasks
-
-    # Check Cache — include language so Hindi/English responses are stored separately
-    cached = db.query(AICropTaskCache).filter(
-        AICropTaskCache.crop_name == crop.crop_name,
-        AICropTaskCache.stage == current_stage,
-        AICropTaskCache.weather_profile == weather_profile,
-        AICropTaskCache.language == lang_code,
+    # Read schedule from CropDataCache
+    cached = db.query(CropDataCache).filter(
+        CropDataCache.standard_name_en == crop.crop_name
     ).first()
     
-    if cached:
-        # Recalculate status from cache so it stays accurate as days progress
-        tasks = _recalculate_status(list(cached.tasks_json), days_since_planting)
-        return {"tasks": tasks, "source": "cache", "stage": current_stage}
-        
-    # Generate new tasks using Gemini
+    if cached and cached.smart_schedule_hi:
+        tasks = list(cached.smart_schedule_hi)
+    else:
+        # Fallback if cache miss (crop still processing)
+        tasks = [{"task": f"{crop.crop_name} की जांच करें", "icon": "👀", "day": 0, "status": "current"}]
     
-    system_prompt = (
-        f"You are an expert Indian agronomist. Generate a timeline of exactly 6-8 key farming milestones "
-        f"for {crop.crop_name} over its full growing cycle. "
-        f"The crop was planted {days_since_planting} days ago and is currently in the '{current_stage}' stage "
-        f"with a '{weather_profile}' weather profile. "
-        f"Assign realistic cumulative 'day' values (days after planting date) for each milestone across the full crop lifecycle. "
-        f"Output ONLY a valid JSON array of objects, with no markdown fences. "
-        f'Each object must have "task" (string), "icon" (string, a single emoji), '
-        f'"day" (integer, cumulative days after planting for that milestone), and "status" (string: any value, it will be recalculated). '
-        f"Ensure the tasks are written in {target_language}."
-    )
-    
-    tasks = []
-    try:
-        import google.generativeai as genai
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-flash-latest", system_instruction=system_prompt)
-        
-        response = model.generate_content(
-            f"Generate full lifecycle milestones for {crop.crop_name}. "
-            f"Current day: {days_since_planting}. Stage: {current_stage}."
-        )
-        response_text = response.text.strip()
-        
-        if response_text.startswith("```"):
-            lines = response_text.split("\n")
-            lines = [l for l in lines if not l.strip().startswith("```")]
-            response_text = "\n".join(lines).strip()
-            
-        tasks = json.loads(response_text)
-        
-        # Save raw tasks to cache (without status — it will be recalculated per request)
-        new_cache = AICropTaskCache(
-            crop_name=crop.crop_name,
-            stage=current_stage,
-            weather_profile=weather_profile,
-            language=lang_code,
-            tasks_json=tasks
-        )
-        db.add(new_cache)
-        db.commit()
-        
-    except Exception as e:
-        logger.error(f"Failed to generate dynamic tasks: {e}")
-        tasks = [{"task": f"Check {crop.crop_name} health", "icon": "👀", "day": 0, "status": "current"}]
-
-    # Always override status with server-side calculation
+    # Recalculate status based on actual days
     tasks = _recalculate_status(tasks, days_since_planting)
-    return {"tasks": tasks, "source": "ai", "stage": current_stage}
+    return {"tasks": tasks, "source": "cache", "stage": current_stage}
 
 
-# ── About Crop ─────────────────────────────────────────────────
+# ── About Crop (from CropDataCache) ────────────────────────────
 @router.get("/crops/{crop_id}/about")
 async def get_crop_about(
     request: Request,
@@ -632,33 +570,15 @@ async def get_crop_about(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Generate a short AI summary about the crop factoring in live weather/GDD."""
+    """Get crop about text from CropDataCache. No Gemini calls."""
     crop = _verify_crop_ownership(crop_id, current_user.get("uid"), db)
     
-    today_gdd = await get_todays_gdd(crop.farm.latitude, crop.farm.longitude)
-    total_gdd = crop.cumulative_gdd + today_gdd
-    current_stage = calculate_stage_by_gdd(crop.crop_name, total_gdd)
+    cached = db.query(CropDataCache).filter(
+        CropDataCache.standard_name_en == crop.crop_name
+    ).first()
     
-    accept_lang = request.headers.get("Accept-Language", "en").lower()
-    target_language = "Hindi (using Devanagari script)" if "hi" in accept_lang else "English"
+    if cached and cached.about_hi:
+        return {"about": cached.about_hi}
     
-    system_prompt = (
-        f"You are an expert Indian agronomist. Write exactly 2-3 short, engaging sentences "
-        f"about the '{crop.crop_name}' crop which is currently in the '{current_stage}' stage. "
-        f"Mention a quick tip or fact relevant to its current stage. "
-        f"Always write in {target_language}. Do not use markdown."
-    )
-    
-    try:
-        if not settings.GEMINI_API_KEY:
-            return {"about": f"This is a {crop.crop_name} crop in the {current_stage} stage."}
-            
-        import google.generativeai as genai
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-flash-latest", system_instruction=system_prompt)
-        
-        response = model.generate_content(f"Tell me about {crop.crop_name}.")
-        return {"about": response.text.strip()}
-    except Exception as e:
-        logger.error(f"Failed to generate about crop: {e}")
-        return {"about": f"{crop.crop_name} is currently in the {current_stage} stage."}
+    # Fallback if cache miss (crop still being processed by AI)
+    return {"about": f"{crop.crop_name} की फसल अभी प्रोसेस हो रही है। कृपया कुछ समय बाद देखें।"}
