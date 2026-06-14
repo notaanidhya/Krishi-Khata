@@ -66,12 +66,17 @@ def _calculate_balance(laborer_id: int, db: Session) -> float:
                     else_=0,
                 )
             ), 0
-        )
+        ),
+        func.count(KhataTransaction.id)
     ).filter(
         KhataTransaction.laborer_id == laborer_id,
-    ).scalar()
+        KhataTransaction.type.in_(["labor_wage", "labor_payment"])
+    ).first()
 
-    return float(result) if result else 0.0
+    if result:
+        balance, count = result
+        return float(balance) if balance else 0.0, int(count) if count else 0
+    return 0.0, 0
 
 
 # ── POST /farms/{farm_id}/laborers — Add a laborer ─────────────
@@ -101,6 +106,7 @@ async def add_laborer(
 
     response = laborer.to_dict()
     response["current_balance"] = 0.0  # New laborer has zero balance
+    response["transaction_count"] = 0
     return LaborerResponse(**response)
 
 
@@ -157,20 +163,24 @@ async def list_laborers(
                         ), 0
                     )
                 ).label("balance"),
+                func.count(KhataTransaction.id).label("tx_count"),
             )
             .filter(KhataTransaction.laborer_id.in_(laborer_ids))
+            .filter(KhataTransaction.type.in_(["labor_wage", "labor_payment"]))
             .group_by(KhataTransaction.laborer_id)
             .all()
         )
 
-        balance_map = {row[0]: float(row[1]) for row in balance_query}
+        balance_map = {row[0]: {"balance": float(row[1]), "count": int(row[2])} for row in balance_query}
     else:
         balance_map = {}
 
     results = []
     for laborer in laborers:
         d = laborer.to_dict()
-        d["current_balance"] = balance_map.get(laborer.id, 0.0)
+        stats = balance_map.get(laborer.id, {"balance": 0.0, "count": 0})
+        d["current_balance"] = stats["balance"]
+        d["transaction_count"] = stats["count"]
         results.append(LaborerResponse(**d))
 
     return results
@@ -199,7 +209,9 @@ async def get_laborer(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Laborer not found")
 
     d = laborer.to_dict()
-    d["current_balance"] = _calculate_balance(laborer.id, db)
+    bal, count = _calculate_balance(laborer.id, db)
+    d["current_balance"] = bal
+    d["transaction_count"] = count
     return LaborerResponse(**d)
 
 
@@ -234,5 +246,7 @@ async def update_laborer(
     db.refresh(laborer)
 
     d = laborer.to_dict()
-    d["current_balance"] = _calculate_balance(laborer.id, db)
+    bal, count = _calculate_balance(laborer.id, db)
+    d["current_balance"] = bal
+    d["transaction_count"] = count
     return LaborerResponse(**d)

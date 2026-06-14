@@ -30,6 +30,10 @@ class LaborerResponse(BaseModel):
         0.0,
         description="Net balance: SUM(labor_wage) - SUM(labor_payment). Positive = owed to laborer.",
     )
+    transaction_count: int = Field(
+        0,
+        description="Total number of transactions (wages + payments) for this laborer.",
+    )
 
     class Config:
         from_attributes = True
