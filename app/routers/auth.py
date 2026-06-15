@@ -26,12 +26,27 @@ def create_access_token(data: dict, expires_delta: timedelta):
     return encoded_jwt
 
 
+from sqlalchemy import func
+
+@router.get("/check-username")
+async def check_username(name: str, db: Session = Depends(get_db)):
+    """Check if a username is already taken."""
+    user = db.query(User).filter(func.lower(User.display_name) == name.lower()).first()
+    return {"exists": bool(user)}
+
+
 @router.post("/register", response_model=AuthResponse)
 async def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     """Register a new device with a PIN."""
-    existing_user = db.query(User).filter(User.id == payload.device_id).first()
-    if existing_user:
+    # Check if device_id already exists (edge case)
+    existing_device = db.query(User).filter(User.id == payload.device_id).first()
+    if existing_device:
         raise HTTPException(status_code=400, detail="Device already registered")
+
+    # Check if username already exists
+    existing_user_by_name = db.query(User).filter(func.lower(User.display_name) == payload.display_name.lower()).first()
+    if existing_user_by_name:
+        raise HTTPException(status_code=400, detail="Username already exists")
 
     hashed_pin = bcrypt.hashpw(payload.pin.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     new_user = User(
@@ -65,10 +80,10 @@ async def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=AuthResponse)
 async def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    """Login with device ID and PIN."""
-    user = db.query(User).filter(User.id == payload.device_id).first()
+    """Login with username and PIN."""
+    user = db.query(User).filter(func.lower(User.display_name) == payload.username.lower()).first()
     if not user:
-        raise HTTPException(status_code=404, detail="Device not registered")
+        raise HTTPException(status_code=404, detail="User not found")
     
     if not user.pin_hash or not bcrypt.checkpw(payload.pin.encode('utf-8'), user.pin_hash.encode('utf-8')):
         raise HTTPException(status_code=401, detail="Invalid PIN")
@@ -78,7 +93,7 @@ async def login(payload: LoginRequest, db: Session = Depends(get_db)):
         data={"uid": user.id}, expires_delta=access_token_expires
     )
 
-    return {"token": access_token, "user": user.to_dict()}
+    return {"token": access_token, "user": user.to_dict(), "device_id": user.id}
 
 
 @router.get("/me")

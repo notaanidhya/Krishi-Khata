@@ -133,6 +133,16 @@ origins = [
     "http://localhost:5174", # Allowed port when 5173 is in use
     "https://krishi-khata.vercel.app", # Your live Vercel app
 ]
+@app.middleware("http")
+async def add_cache_control_header(request, call_next):
+    response = await call_next(request)
+    # Prevent browser/CDN caching for all dynamic API GET requests
+    if request.url.path.startswith("/api") and request.method == "GET":
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
