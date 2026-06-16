@@ -5,6 +5,7 @@ from fastapi import APIRouter, Request, Depends
 import httpx
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from cachetools import TTLCache
 from app.dependencies import get_current_user
 from app.config import settings
 
@@ -19,8 +20,8 @@ DEFAULT_LON = 77.4126
 DEFAULT_CITY = "Bhopal"
 DEFAULT_STATE = "Madhya Pradesh"
 
-dashboard_cache = {}
-advisory_cache = {}
+dashboard_cache = TTLCache(maxsize=1000, ttl=3600)
+advisory_cache = TTLCache(maxsize=1000, ttl=3600)
 
 def _wmo_to_condition(code: int) -> tuple[str, str]:
     if code == 0: return "sunny", "Clear Sky"
@@ -41,7 +42,7 @@ def _generate_ai_weather_summary(city: str, state: str, daily_data: dict, target
     dates = daily_data.get("time", [])
     temp_maxes = daily_data.get("temperature_2m_max", [])
     temp_mins = daily_data.get("temperature_2m_min", [])
-    precip_probs = daily_data.get("precipitation_probability_max", [])
+    precip_probs = daily_data.get("precipitation_probability_mean", [])
     codes = daily_data.get("weather_code", [])
 
     summary_parts = []
@@ -129,7 +130,7 @@ async def get_weather_dashboard(
             "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,surface_pressure",
             "daily": (
                 "temperature_2m_max,temperature_2m_min,"
-                "precipitation_probability_max,precipitation_sum,"
+                "precipitation_probability_mean,precipitation_sum,"
                 "weather_code,wind_speed_10m_max,"
                 "relative_humidity_2m_mean"
             ),
@@ -167,7 +168,7 @@ async def get_weather_dashboard(
         dates = daily_raw.get("time", [])
         temp_maxes = daily_raw.get("temperature_2m_max", [])
         temp_mins = daily_raw.get("temperature_2m_min", [])
-        precip_probs = daily_raw.get("precipitation_probability_max", [])
+        precip_probs = daily_raw.get("precipitation_probability_mean", [])
         weather_codes = daily_raw.get("weather_code", [])
         wind_speeds = daily_raw.get("wind_speed_10m_max", [])
         humidities = daily_raw.get("relative_humidity_2m_mean", [])
@@ -253,7 +254,7 @@ async def get_ai_advisory(
             "longitude": lon,
             "daily": (
                 "temperature_2m_max,temperature_2m_min,"
-                "precipitation_probability_max,weather_code"
+                "precipitation_probability_mean,weather_code"
             ),
             "timezone": "Asia/Kolkata",
             "forecast_days": 7,
