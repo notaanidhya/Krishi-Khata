@@ -29,14 +29,15 @@ def fetch_mandi_prices(state: Optional[str] = None, district: Optional[str] = No
         "api-key": api_key,
         "format": "json",
         "limit": "500",
+        "sort[Arrival_Date]": "desc",
     }
     
     if state:
-        params["filters[State]"] = state
+        params["filters[State]"] = state.title()
     if district:
-        params["filters[District]"] = district
+        params["filters[District]"] = district.title()
     if commodity:
-        params["filters[Commodity]"] = commodity
+        params["filters[Commodity]"] = commodity.title()
 
     try:
         with httpx.Client(timeout=30.0) as client:
@@ -171,9 +172,10 @@ def fetch_historical_mandi_prices(
         "api-key": api_key,
         "format": "json",
         "limit": "1000",                     # pull as many as the API allows
-        "filters[State]": state,
-        "filters[District]": district,
-        "filters[Commodity]": commodity,
+        "filters[State]": state.title(),
+        "filters[District]": district.title(),
+        "filters[Commodity]": commodity.title(),
+        "sort[Arrival_Date]": "desc",
     }
 
     all_records: List[dict] = []

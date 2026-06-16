@@ -130,15 +130,16 @@ def get_latest_prices(
     commodity: Optional[str] = Query(None, description="Filter by commodity name"),
     district: Optional[str] = Query(None, description="Filter by district"),
     state: Optional[str]    = Query(None, description="Filter by state"),
+    overview: bool          = Query(False, description="If true, fetch overview of markets"),
     db: Session             = Depends(get_db),
     current_user: dict      = Depends(get_current_user),
     background_tasks: BackgroundTasks = BackgroundTasks(),
 ):
     """
     Latest mandi prices from data.gov.in with in-memory caching.
-    Uses smart defaulting to pull the active farmer's state/district.
+    Uses smart defaulting to pull the active farmer's state/district unless overview is requested.
     """
-    if not district and not state:
+    if not overview and not district and not state:
         user_id = current_user.get("uid")
         farm = db.query(Farm).filter(Farm.user_id == user_id).first()
         
@@ -160,22 +161,31 @@ def get_latest_prices(
     if records:
         background_tasks.add_task(upsert_prices_to_db, records)
         
-        # Deduplicate records by commodity, keeping only the one with the latest arrival_date
         records_sorted = sorted(
             records,
             key=lambda r: normalize_date(r.get("arrival_date") or r.get("Arrival_Date") or ""),
             reverse=True
         )
         
-        seen_commodities = set()
+        seen_keys = set()
         deduped_records = []
         for r in records_sorted:
             comm = r.get("commodity") or r.get("Commodity")
             if not comm:
                 continue
-            comm_lower = comm.lower()
-            if comm_lower not in seen_commodities:
-                seen_commodities.add(comm_lower)
+            
+            if overview:
+                # Deduplicate by state + district + market
+                st = (r.get("state") or r.get("State") or "").lower()
+                dist = (r.get("district") or r.get("District") or "").lower()
+                mkt = (r.get("market") or r.get("Market") or "").lower()
+                key = f"{comm.lower()}-{st}-{dist}-{mkt}"
+            else:
+                # Deduplicate by commodity only (for the ticker)
+                key = comm.lower()
+                
+            if key not in seen_keys:
+                seen_keys.add(key)
                 deduped_records.append(r)
                 
         records = deduped_records
