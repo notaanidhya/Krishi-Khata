@@ -16,3 +16,4 @@ slowapi==0.1.9
 cachetools==5.3.3
 httpx>=0.28.1
 google-genai
+deep-translator

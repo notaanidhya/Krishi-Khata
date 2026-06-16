@@ -108,9 +108,14 @@ async def get_mandi_metadata(db: Session = Depends(get_db)):
     commodity_set = {c.title() for c in TOP_CROPS + db_commodities if c}
     district_set = {d.title() for d in TOP_DISTRICTS + db_districts if d}
     
+    districts_list = sorted(list(district_set))
+    from app.utils.translator import translate_to_hindi
+    districts_hi = translate_to_hindi(districts_list, db)
+    
     return {
         "commodities": sorted(list(commodity_set)),
-        "districts": sorted(list(district_set))
+        "districts": districts_list,
+        "districts_hi": districts_hi
     }
 
 # ════════════════════════════════════════════════════════════════
@@ -122,6 +127,7 @@ from fastapi import Request
 from app.models.farm import Farm
 from app.utils.mandi_api import fetch_mandi_prices, upsert_prices_to_db, fetch_historical_mandi_prices, normalize_date
 from app.models.mandi import MandiPriceHistory
+from app.utils.translator import translate_to_hindi
 
 @router.get("/latest")
 @limiter.limit("20/minute")
@@ -188,7 +194,25 @@ def get_latest_prices(
                 seen_keys.add(key)
                 deduped_records.append(r)
                 
+                
         records = deduped_records
+        
+        names_to_translate = set()
+        for r in records:
+            if r.get("district") or r.get("District"):
+                names_to_translate.add(r.get("district") or r.get("District"))
+            if r.get("market") or r.get("Market"):
+                names_to_translate.add(r.get("market") or r.get("Market"))
+                
+        translations = translate_to_hindi(list(names_to_translate), db)
+        
+        for r in records:
+            dist = r.get("district") or r.get("District")
+            mkt = r.get("market") or r.get("Market")
+            if dist in translations:
+                r["district_hi"] = translations[dist]
+            if mkt in translations:
+                r["market_hi"] = translations[mkt]
     
     return {
         "count": len(records),
