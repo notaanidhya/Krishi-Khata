@@ -101,9 +101,10 @@ def _generate_ai_weather_summary(city: str, state: str, daily_data: dict, target
         cond = _wmo_to_condition(code)[0]
         return {
             "advisory": _generate_advisory(cond, t_max, rain),
-            "daily_tip": "नियमित रूप से मिट्टी की जांच करवाएं और उचित खाद का प्रयोग करें।",
+            "daily_tip": "रोजाना खेत का निरीक्षण करें और जरूरत पड़ने पर ही सिंचाई करें।",
             "moisture_status": "सामान्य",
-            "moisture_description": "मिट्टी में नमी की मात्रा अच्छी है। नियमित सिंचाई अनुसूची पर्याप्त है।"
+            "moisture_description": "मिट्टी में नमी की मात्रा अच्छी है। नियमित सिंचाई अनुसूची पर्याप्त है।",
+            "is_fallback": True
         }
 
 
@@ -274,16 +275,19 @@ async def get_ai_advisory(
             "ai_summary": summary.get("advisory", ""),
             "daily_tip": summary.get("daily_tip", ""),
             "moisture_status": summary.get("moisture_status", "सामान्य"),
-            "moisture_description": summary.get("moisture_description", "मिट्टी में नमी की मात्रा अच्छी है।")
+            "moisture_description": summary.get("moisture_description", "मिट्टी में नमी की मात्रा अच्छी है।"),
+            "is_fallback": summary.get("is_fallback", False)
         }
-        advisory_cache[cache_key] = result
+        if not result["is_fallback"]:
+            advisory_cache[cache_key] = result
         return result
 
     except Exception as e:
         logger.error(f"AI advisory failed: {e}")
         return {
-            "ai_summary": "आज कोई सुझाव उपलब्ध नहीं है।",
-            "daily_tip": "स्वस्थ फसल के लिए अच्छे बीजों का चयन करें।",
+            "ai_summary": "आज कोई सुझाव उपलब्ध नहीं है。",
+            "daily_tip": "स्वस्थ फसल के लिए अच्छे बीजों का चयन करें。",
             "moisture_status": "सामान्य",
-            "moisture_description": "मौसम डेटा उपलब्ध नहीं है - कृपया स्वयं मिट्टी की नमी की जांच करें।"
+            "moisture_description": "मौसम डेटा उपलब्ध नहीं है - कृपया स्वयं मिट्टी की नमी की जांच करें。",
+            "is_fallback": True
         }
