@@ -51,10 +51,6 @@ class CropCycle(Base):
         Boolean, nullable=True, default=False,
         comment="Whether the background AI validation completed successfully"
     )
-    ai_validated = Column(
-        Boolean, nullable=True, default=False,
-        comment="Whether the background AI validation completed successfully"
-    )
 
     # ── Relationships ──────────────────────────────────────────────
     farm = relationship("Farm", back_populates="crop_cycles")

@@ -33,10 +33,6 @@ class KhataTransaction(Base):
     laborer_id = Column(
         Integer, ForeignKey("laborers.id", ondelete="SET NULL"),
         nullable=True, index=True,
-    )
-    laborer_id = Column(
-        Integer, ForeignKey("laborers.id", ondelete="SET NULL"),
-        nullable=True, index=True,
         comment="Links labor_wage/labor_payment transactions to a specific laborer",
     )
 

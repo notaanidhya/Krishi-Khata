@@ -33,9 +33,11 @@ def get_crop_presets() -> list[str]:
     presets = []
     try:
         db = SessionLocal()
-        cached_crops = db.query(CropDataCache.standard_name_en).all()
-        presets = [row[0] for row in cached_crops]
-        db.close()
+        try:
+            cached_crops = db.query(CropDataCache.standard_name_en).all()
+            presets = [row[0] for row in cached_crops]
+        finally:
+            db.close()
     except Exception:
         pass
     return sorted(presets)
@@ -45,10 +47,12 @@ def get_stages_for_crop(crop_name: str) -> dict[str, int]:
     """Return day-based stage intervals for a crop from CropDataCache."""
     try:
         db = SessionLocal()
-        cached = db.query(CropDataCache).filter(
-            CropDataCache.standard_name_en == crop_name
-        ).first()
-        db.close()
+        try:
+            cached = db.query(CropDataCache).filter(
+                CropDataCache.standard_name_en == crop_name
+            ).first()
+        finally:
+            db.close()
         if cached and cached.day_stages:
             return cached.day_stages
     except Exception:
@@ -60,10 +64,12 @@ def get_gdd_stages_for_crop(crop_name: str) -> dict[str, float]:
     """Return GDD stage intervals for a crop from CropDataCache."""
     try:
         db = SessionLocal()
-        cached = db.query(CropDataCache).filter(
-            CropDataCache.standard_name_en == crop_name
-        ).first()
-        db.close()
+        try:
+            cached = db.query(CropDataCache).filter(
+                CropDataCache.standard_name_en == crop_name
+            ).first()
+        finally:
+            db.close()
         if cached and cached.gdd_stages:
             return cached.gdd_stages
     except Exception:

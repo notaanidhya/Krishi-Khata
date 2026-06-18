@@ -143,6 +143,7 @@ async def websocket_chat(websocket: WebSocket):
     """
     await websocket.accept()
 
+    uid = None
     try:
         raw_auth = await asyncio.wait_for(websocket.receive_text(), timeout=15.0)
         auth_data = json.loads(raw_auth)
@@ -174,6 +175,9 @@ async def websocket_chat(websocket: WebSocket):
         logger.error(f"Unexpected error during WS auth: {e}", exc_info=True)
         return await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
 
+    if not uid and settings.ENABLE_DEV_BYPASS:
+        uid = "dev-bypass-user"
+
     await manager.connect(websocket)
     try:
         while True:
@@ -189,7 +193,7 @@ async def websocket_chat(websocket: WebSocket):
                 continue
 
             # Validate required fields
-            device_id = (data.get("device_id") or "").strip()
+            device_id = uid
             sender_name = (data.get("sender_name") or "").strip()
             content = (data.get("content") or "").strip() or None
             image_url = (data.get("image_url") or "").strip() or None

@@ -11,6 +11,7 @@ Key endpoints:
 
 import json
 import logging
+import asyncio
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, status, Request, BackgroundTasks
 from pydantic import BaseModel, Field
@@ -481,8 +482,8 @@ async def add_crop_log(
     """
     crop = _verify_crop_ownership(crop_id, current_user.get("uid"), db)
 
-    # Call AI
-    ai_result = _analyze_with_gemini(payload.raw_content, crop.crop_name)
+    # Call AI in a background thread to prevent blocking the event loop
+    ai_result = await asyncio.to_thread(_analyze_with_gemini, payload.raw_content, crop.crop_name)
     
     stage = None
     health_notes = None
