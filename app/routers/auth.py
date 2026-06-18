@@ -3,14 +3,14 @@ Auth routes — Ghost Auth (Device ID + PIN) and user profile management.
 """
 
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import Session
 import bcrypt
 import jwt
 
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, limiter
 from app.models.user import User
 from app.models.farm import Farm
 from app.schemas.auth import RegisterRequest, LoginRequest, AuthResponse
@@ -36,7 +36,8 @@ async def check_username(name: str, db: Session = Depends(get_db)):
 
 
 @router.post("/register", response_model=AuthResponse)
-async def register(payload: RegisterRequest, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+async def register(request: Request, payload: RegisterRequest, db: Session = Depends(get_db)):
     """Register a new device with a PIN."""
     # Check if device_id already exists (edge case)
     existing_device = db.query(User).filter(User.id == payload.device_id).first()
@@ -79,7 +80,8 @@ async def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=AuthResponse)
-async def login(payload: LoginRequest, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+async def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)):
     """Login with username and PIN."""
     user = db.query(User).filter(func.lower(User.display_name) == payload.username.lower()).first()
     if not user:

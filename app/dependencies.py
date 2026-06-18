@@ -9,8 +9,11 @@ import jwt
 
 from app.database import get_db
 from app.config import settings
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 security = HTTPBearer()
+limiter = Limiter(key_func=get_remote_address)
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),

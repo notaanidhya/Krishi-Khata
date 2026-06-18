@@ -6,7 +6,7 @@ Mandi models:
 
 from datetime import datetime, timezone
 from sqlalchemy import (
-    Column, Integer, Float, String, DateTime,
+    Column, Integer, Float, String, DateTime, Date,
     ForeignKey, UniqueConstraint, Index,
 )
 from sqlalchemy.orm import relationship
@@ -25,7 +25,7 @@ class MandiPriceHistory(Base):
     state = Column(String(100), nullable=False)
     district = Column(String(100), nullable=False, index=True)
     price = Column(Float, nullable=False)  # price per quintal (modal price)
-    arrival_date = Column(String(50), nullable=False, index=True)
+    arrival_date = Column(Date, nullable=False, index=True)
 
     __table_args__ = (
         UniqueConstraint(
@@ -41,5 +41,5 @@ class MandiPriceHistory(Base):
             "state": self.state,
             "district": self.district,
             "price": self.price,
-            "arrival_date": self.arrival_date,
+            "arrival_date": self.arrival_date.isoformat() if self.arrival_date else None,
         }
