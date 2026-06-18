@@ -178,6 +178,12 @@ async def get_weather_dashboard(
         for i in range(min(7, len(dates))):
             d = datetime.strptime(dates[i], "%Y-%m-%d")
             day_code = weather_codes[i] if i < len(weather_codes) else 0
+            precip_prob = precip_probs[i] if i < len(precip_probs) else 0
+            
+            # Downgrade rain/drizzle to partly cloudy if probability is too low to be realistic
+            if precip_prob < 20 and day_code in [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99]:
+                day_code = 3
+                
             day_cond, day_cond_text = _wmo_to_condition(day_code)
             forecast_7day.append({
                 "date": dates[i],
