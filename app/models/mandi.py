@@ -41,5 +41,5 @@ class MandiPriceHistory(Base):
             "state": self.state,
             "district": self.district,
             "price": self.price,
-            "arrival_date": self.arrival_date.isoformat() if self.arrival_date else None,
+            "arrival_date": self.arrival_date.isoformat() if hasattr(self.arrival_date, "isoformat") else str(self.arrival_date) if self.arrival_date else None,
         }
