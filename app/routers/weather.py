@@ -120,7 +120,7 @@ async def get_weather_dashboard(
     """
     Advanced Agriculture Weather Dashboard.
     """
-    cache_key = f"{lat:.2f},{lon:.2f}"
+    cache_key = f"v2_{lat:.2f},{lon:.2f}"
     if cache_key in dashboard_cache:
         return dashboard_cache[cache_key]
 
@@ -181,7 +181,7 @@ async def get_weather_dashboard(
             precip_prob = precip_probs[i] if i < len(precip_probs) else 0
             
             # Downgrade rain/drizzle to partly cloudy if probability is too low to be realistic
-            if precip_prob < 20 and day_code in [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99]:
+            if precip_prob <= 20 and day_code in [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99]:
                 day_code = 3
                 
             day_cond, day_cond_text = _wmo_to_condition(day_code)
