@@ -1,6 +1,7 @@
 import httpx
 from datetime import date
 from typing import Optional
+import json
 
 ARCHIVE_API_URL = "https://archive-api.open-meteo.com/v1/archive"
 FORECAST_API_URL = "https://api.open-meteo.com/v1/forecast"
@@ -25,7 +26,7 @@ async def fetch_historical_gdd(lat: float, lon: float, start_date: date, end_dat
     
     cumulative_gdd = 0.0
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, headers={"User-Agent": "Agroo/1.0"}) as client:
             response = await client.get(ARCHIVE_API_URL, params=params)
             response.raise_for_status()
             data = response.json()
@@ -41,7 +42,10 @@ async def fetch_historical_gdd(lat: float, lon: float, start_date: date, end_dat
                         cumulative_gdd += gdd
                         
     except Exception as e:
-        print(f"Error fetching historical GDD: {e}")
+        if isinstance(e, json.JSONDecodeError):
+            print(f"Warning: Open-Meteo returned invalid JSON. Using fallback historical GDD. (url: {ARCHIVE_API_URL})")
+        else:
+            print(f"Error fetching historical GDD: {e}")
         # Fallback approximation: 15 GDD per day
         days = (end_date - start_date).days + 1
         cumulative_gdd = days * 15.0
@@ -60,7 +64,7 @@ async def get_todays_gdd(lat: float, lon: float, base_temp: float = 10.0) -> flo
     }
     
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=5.0, headers={"User-Agent": "Agroo/1.0"}) as client:
             response = await client.get(FORECAST_API_URL, params=params)
             response.raise_for_status()
             data = response.json()
@@ -73,6 +77,9 @@ async def get_todays_gdd(lat: float, lon: float, base_temp: float = 10.0) -> flo
                 gdd = ((t_max + t_min) / 2.0) - base_temp
                 return max(0.0, gdd)
     except Exception as e:
-        print(f"Error fetching today's GDD: {e}")
+        if isinstance(e, json.JSONDecodeError):
+            print(f"Warning: Open-Meteo returned invalid JSON. Using fallback today's GDD. (url: {FORECAST_API_URL})")
+        else:
+            print(f"Error fetching today's GDD: {e}")
         
     return 15.0 # fallback
