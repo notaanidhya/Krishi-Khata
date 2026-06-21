@@ -34,11 +34,48 @@ def _wmo_to_condition(code: int) -> tuple[str, str]:
     if code in [95, 96, 99]: return "thunderstorm", "Thunderstorm"
     return "sunny", "Clear Sky"
 
-def _generate_advisory(cond, t_max, rain):
-    return "नियमित रूप से मिट्टी की जांच करवाएं और उचित खाद का प्रयोग करें।"
+def _generate_advisory(cond: str, t_max: float, rain: float) -> str:
+    """Generate a contextual advisory based on real weather data without Gemini."""
+    parts = []
 
-def _generate_ai_weather_summary(city: str, state: str, daily_data: dict, target_language: str = "English") -> dict:
-    """Call Gemini for a hyper-concise agronomist weather advisory."""
+    # Heat advisory
+    if t_max >= 42:
+        parts.append("आज अत्यधिक गर्मी है — फसलों को सुबह या शाम सिंचाई दें, दोपहर में काम से बचें।")
+    elif t_max >= 37:
+        parts.append("तापमान अधिक है — फसलों में पर्याप्त नमी बनाए रखें और छाया का प्रबंध करें।")
+    elif t_max <= 15:
+        parts.append("ठंड अधिक है — पाले से फसलों को बचाने के लिए हल्की सिंचाई करें।")
+
+    # Rain advisory
+    if rain >= 70:
+        parts.append("भारी बारिश की संभावना है — खेत में जलनिकासी की व्यवस्था करें और कटाई टालें।")
+    elif rain >= 40:
+        parts.append("बारिश हो सकती है — कटाई व छिड़काव कार्य स्थगित रखें।")
+    elif rain < 15:
+        parts.append("सूखा मौसम — नियमित सिंचाई करें और मिट्टी की नमी जांचते रहें।")
+
+    # Condition-specific
+    if cond in ('thunderstorm',):
+        parts.append("आंधी-तूफान की चेतावनी — खुले खेत में काम न करें।")
+    elif cond in ('fog',):
+        parts.append("कोहरे के कारण फसल में फफूंद रोग का खतरा बढ़ सकता है — निगरानी रखें।")
+
+    # Fallback if nothing specific
+    if not parts:
+        parts.append("नियमित रूप से मिट्टी की जांच करवाएं और उचित खाद का प्रयोग करें।")
+
+    return " ".join(parts)
+
+def _generate_ai_weather_summary(
+    city: str,
+    state: str,
+    daily_data: dict,
+    target_language: str = "English",
+    crop_name: str = None,
+    days_since_planting: int = None,
+    current_stage: str = None,
+) -> dict:
+    """Call Gemini for a personalised agronomist advisory based on weather + crop stage."""
     dates = daily_data.get("time", [])
     temp_maxes = daily_data.get("temperature_2m_max", [])
     temp_mins = daily_data.get("temperature_2m_min", [])
@@ -55,6 +92,18 @@ def _generate_ai_weather_summary(city: str, state: str, daily_data: dict, target
 
     weather_summary = "; ".join(summary_parts)
 
+    # Build crop context string for the Gemini prompt
+    if crop_name and days_since_planting is not None and current_stage:
+        crop_context = (
+            f"The farmer is currently growing {crop_name}, planted {days_since_planting} days ago "
+            f"(current growth stage: {current_stage}). "
+            f"Tailor ALL advice specifically to this crop at this exact growth stage."
+        )
+    elif crop_name:
+        crop_context = f"The farmer is growing {crop_name}. Tailor all advice specifically to this crop."
+    else:
+        crop_context = "No specific crop information is available — give general farming advice."
+
     if not settings.GEMINI_API_KEY:
         code = codes[0] if codes else 0
         t_max = temp_maxes[0] if temp_maxes else 35
@@ -64,13 +113,14 @@ def _generate_ai_weather_summary(city: str, state: str, daily_data: dict, target
             "advisory": _generate_advisory(cond, t_max, rain),
             "daily_tip": "रोजाना खेत का निरीक्षण करें और जरूरत पड़ने पर ही सिंचाई करें।",
             "moisture_status": "सामान्य",
-            "moisture_description": "मिट्टी में नमी की मात्रा अच्छी है। नियमित सिंचाई अनुसूची पर्याप्त है।"
+            "moisture_description": "मिट्टी में नमी की मात्रा अच्छी है। नियमित सिंचाई अनुसूची पर्याप्त है।",
+            "is_fallback": True
         }
 
     try:
         from google import genai
         from google.genai import types
-        
+
         client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
         response = client.models.generate_content(
@@ -79,16 +129,19 @@ def _generate_ai_weather_summary(city: str, state: str, daily_data: dict, target
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 system_instruction=(
-                    f"You are an expert Indian agronomist weather bot. "
-                    f"The upcoming 7-day forecast for {city}, {state} predicts: {weather_summary}. "
+                    f"You are an expert Indian agronomist weather advisor speaking directly to a farmer. "
+                    f"{crop_context} "
+                    f"The upcoming 7-day forecast for {city}, {state} is: {weather_summary}. "
                     f"You must return a JSON object with exactly four keys: "
-                    f"1. 'advisory': A hyper-concise 2-sentence summary warning the farmer of specific risks "
-                    f"(heat stress, fungal risks due to humidity, harvesting logistics). "
-                    f"2. 'daily_tip': An everyday farming tip or interesting fact related to agriculture, written in simple conversational Hindi. "
-                    f"3. 'moisture_status': One word describing soil moisture based on the recent weather (e.g., 'सूखा', 'सामान्य', 'अधिक नमी'). "
-                    f"4. 'moisture_description': A 1-sentence description of the soil moisture condition and watering advice. "
-                    f"You MUST respond natively in Hindi (using Devanagari script). Avoid overly formal or academic terms; "
-                    f"use vocabulary easily understood by a typical Indian farmer. "
+                    f"1. 'advisory': 2-3 sentences of highly specific advice for this farmer right now — "
+                    f"mention the crop name and growth stage explicitly, warn of real risks like fungal infection, "
+                    f"heat stress on the crop at this stage, irrigation needs, or upcoming harvest timing. "
+                    f"2. 'daily_tip': One practical everyday farming tip relevant to this crop at its current stage, "
+                    f"written in simple conversational Hindi that any farmer would understand. "
+                    f"3. 'moisture_status': One word/phrase for current soil moisture (e.g., 'सूखा', 'सामान्य', 'अधिक नमी'). "
+                    f"4. 'moisture_description': 1 sentence describing soil moisture and specific watering advice for this crop stage. "
+                    f"IMPORTANT: Respond entirely in Hindi (Devanagari script). Use simple, conversational language "
+                    f"that a village farmer can easily understand. Be specific — not generic."
                 ),
             )
         )
@@ -106,6 +159,7 @@ def _generate_ai_weather_summary(city: str, state: str, daily_data: dict, target
             "moisture_description": "मिट्टी में नमी की मात्रा अच्छी है। नियमित सिंचाई अनुसूची पर्याप्त है।",
             "is_fallback": True
         }
+
 
 
 @router.get("/dashboard")
@@ -250,8 +304,12 @@ async def get_ai_advisory(
     lon: float = DEFAULT_LON,
     city: str = DEFAULT_CITY,
     state: str = DEFAULT_STATE,
+    crop_name: str = None,
+    days_since_planting: int = None,
+    current_stage: str = None,
 ):
-    cache_key = f"{lat:.2f},{lon:.2f}"
+    # Include crop context in cache key so different crops get their own advisory
+    cache_key = f"{lat:.2f},{lon:.2f}|{crop_name or ''}|{current_stage or ''}"
     if cache_key in advisory_cache:
         return advisory_cache[cache_key]
 
@@ -275,14 +333,21 @@ async def get_ai_advisory(
         daily_raw = raw.get("daily", {})
         target_language = "Hindi (using natural, conversational Devanagari script)"
 
-        summary = _generate_ai_weather_summary(city, state, daily_raw, target_language)
+        summary = _generate_ai_weather_summary(
+            city, state, daily_raw, target_language,
+            crop_name=crop_name,
+            days_since_planting=days_since_planting,
+            current_stage=current_stage,
+        )
 
         result = {
             "ai_summary": summary.get("advisory", ""),
             "daily_tip": summary.get("daily_tip", ""),
             "moisture_status": summary.get("moisture_status", "सामान्य"),
             "moisture_description": summary.get("moisture_description", "मिट्टी में नमी की मात्रा अच्छी है।"),
-            "is_fallback": summary.get("is_fallback", False)
+            "is_fallback": summary.get("is_fallback", False),
+            "crop_name": crop_name,
+            "current_stage": current_stage,
         }
         if not result["is_fallback"]:
             advisory_cache[cache_key] = result
@@ -291,9 +356,9 @@ async def get_ai_advisory(
     except Exception as e:
         logger.error(f"AI advisory failed: {e}")
         return {
-            "ai_summary": "आज कोई सुझाव उपलब्ध नहीं है。",
-            "daily_tip": "स्वस्थ फसल के लिए अच्छे बीजों का चयन करें。",
+            "ai_summary": "आज मौसम सामान्य रहने की उम्मीद है। फसल की नियमित निगरानी करते रहें और जरूरत पड़ने पर ही सिंचाई करें।",
+            "daily_tip": "स्वस्थ फसल के लिए अच्छे बीजों का चयन करें और समय पर सिंचाई करें।",
             "moisture_status": "सामान्य",
-            "moisture_description": "मौसम डेटा उपलब्ध नहीं है - कृपया स्वयं मिट्टी की नमी की जांच करें。",
+            "moisture_description": "मिट्टी में नमी की मात्रा अच्छी है। नियमित सिंचाई अनुसूची पर्याप्त है।",
             "is_fallback": True
         }
