@@ -16,14 +16,19 @@ HEADERS = {
 }
 
 # Cache up to 100 distinct queries for 4 hours (14400 seconds)
+# IMPORTANT: Only cache successful (non-empty) responses.
 mandi_cache = TTLCache(maxsize=100, ttl=14400)
 
-@cached(cache=mandi_cache)
+
 def fetch_mandi_prices(state: Optional[str] = None, district: Optional[str] = None, commodity: Optional[str] = None) -> Dict[str, Any]:
     api_key = settings.DATAGOV_API_KEY
     if not api_key:
         logger.warning("DATAGOV_API_KEY is not set. Mandi API will fail or return empty.")
-        return {"records": []}
+        return {"records": [], "error": "API key not configured"}
+
+    cache_key = (state, district, commodity)
+    if cache_key in mandi_cache:
+        return mandi_cache[cache_key]
 
     params = {
         "api-key": api_key,
@@ -44,6 +49,12 @@ def fetch_mandi_prices(state: Optional[str] = None, district: Optional[str] = No
             response = client.get(GOV_API_URL, params=params, headers=HEADERS)
         response.raise_for_status()
         data = response.json()
+        # Only cache if we got actual records — don't cache empty/failed responses
+        records = data.get("records", [])
+        if records:
+            mandi_cache[cache_key] = data
+        else:
+            logger.warning(f"Gov API returned empty records for {state}/{district}/{commodity} — not caching.")
         return data
     except httpx.HTTPStatusError as e:
         logger.error(f"HTTP error fetching mandi prices: {e.response.status_code} - {e}")

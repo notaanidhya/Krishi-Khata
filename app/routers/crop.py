@@ -26,7 +26,7 @@ from app.schemas.crop import (
     CropLogResponse,
     CropCycleResponse,
 )
-from app.utils.crop_stages import calculate_stage, calculate_stage_by_gdd, get_crop_presets
+from app.utils.crop_stages import calculate_stage, calculate_stage_by_gdd, get_crop_presets, get_crop_presets_i18n, get_crop_name_hi
 from app.utils.gdd_calculator import fetch_historical_gdd, get_todays_gdd
 from app.utils.ai_validator import async_validate_crop
 from app.models.crop_data_cache import CropDataCache
@@ -156,6 +156,7 @@ async def _crop_to_response(crop: CropCycle) -> dict:
     d["is_processing"] = is_custom_crop and not crop.ai_validated and not crop.ai_validation_failed
     d["validation_failed"] = bool(crop.ai_validation_failed)
     d["logs"] = [log.to_dict() for log in (crop.logs or [])]
+    d["crop_name_hi"] = get_crop_name_hi(crop.crop_name)
     return d
 
 
@@ -163,7 +164,7 @@ async def _crop_to_response(crop: CropCycle) -> dict:
 @router.get("/crop-presets")
 async def list_crop_presets():
     """Return sorted list of known Indian crop names for the Add Crop modal."""
-    return get_crop_presets()
+    return get_crop_presets_i18n()
 
 
 # ── Farm CRUD ──────────────────────────────────────────────────

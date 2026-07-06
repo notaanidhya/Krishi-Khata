@@ -43,6 +43,38 @@ def get_crop_presets() -> list[str]:
     return sorted(presets)
 
 
+def get_crop_presets_i18n() -> list[dict]:
+    """Return sorted list of dicts with en and hi names from CropDataCache."""
+    presets = []
+    try:
+        db = SessionLocal()
+        try:
+            cached_crops = db.query(CropDataCache.standard_name_en, CropDataCache.standard_name_hi).all()
+            presets = [{"en": row[0], "hi": row[1]} for row in cached_crops]
+        finally:
+            db.close()
+    except Exception:
+        pass
+    return sorted(presets, key=lambda x: x["en"])
+
+
+def get_crop_name_hi(crop_name: str) -> str | None:
+    """Return the Hindi name for a given crop if available."""
+    try:
+        db = SessionLocal()
+        try:
+            cached = db.query(CropDataCache.standard_name_hi).filter(
+                CropDataCache.standard_name_en == crop_name
+            ).first()
+        finally:
+            db.close()
+        if cached:
+            return cached[0]
+    except Exception:
+        pass
+    return None
+
+
 def get_stages_for_crop(crop_name: str) -> dict[str, int]:
     """Return day-based stage intervals for a crop from CropDataCache."""
     try:

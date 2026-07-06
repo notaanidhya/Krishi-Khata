@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     # Mock data toggle — set to False to hit live APIs
     USE_MOCK_DATA: bool = True
 
+    # WeatherAPI.com — Hyper-local weather data
+    WEATHERAPI_KEY: str = ""
+
     # Gemini AI — for Smart Farm Diary analysis
     GEMINI_API_KEY: str = ""
 

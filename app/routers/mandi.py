@@ -97,6 +97,7 @@ async def get_mandi_metadata(db: Session = Depends(get_db)):
     """
     Returns unique commodities and districts for searchable dropdowns.
     Combines hardcoded popular lists with actual history entries in the DB.
+    Also returns hindi translations for both commodities and districts.
     """
     from app.models.mandi import MandiPriceHistory
     
@@ -108,14 +109,18 @@ async def get_mandi_metadata(db: Session = Depends(get_db)):
     commodity_set = {c.title() for c in TOP_CROPS + db_commodities if c}
     district_set = {d.title() for d in TOP_DISTRICTS + db_districts if d}
     
+    commodities_list = sorted(list(commodity_set))
     districts_list = sorted(list(district_set))
+
     from app.utils.translator import translate_to_hindi
     districts_hi = translate_to_hindi(districts_list, db)
+    commodities_hi = translate_to_hindi(commodities_list, db)
     
     return {
-        "commodities": sorted(list(commodity_set)),
+        "commodities": commodities_list,
         "districts": districts_list,
-        "districts_hi": districts_hi
+        "districts_hi": districts_hi,
+        "commodities_hi": commodities_hi,
     }
 
 # ════════════════════════════════════════════════════════════════
@@ -218,6 +223,7 @@ def get_latest_prices(
         "count": len(records),
         "last_fetched": datetime.now(timezone.utc).isoformat(),
         "prices": records,
+        "api_error": data.get("error"),
     }
 
 

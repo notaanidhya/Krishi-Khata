@@ -33,6 +33,7 @@ class CropCycleResponse(BaseModel):
     id: int
     farm_id: int
     crop_name: str
+    crop_name_hi: Optional[str] = None
     planting_date: date
     status: str
     days_since_planting: int
