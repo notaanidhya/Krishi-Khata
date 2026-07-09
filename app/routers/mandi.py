@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.models.user import User
 
 from app.schemas.dashboard import MandiPricesResponse
 
@@ -143,7 +144,7 @@ def get_latest_prices(
     state: Optional[str]    = Query(None, description="Filter by state"),
     overview: bool          = Query(False, description="If true, fetch overview of markets"),
     db: Session             = Depends(get_db),
-    current_user: dict      = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     background_tasks: BackgroundTasks = BackgroundTasks(),
 ):
     """
@@ -151,7 +152,7 @@ def get_latest_prices(
     Uses smart defaulting to pull the active farmer's state/district unless overview is requested.
     """
     if not overview and not district and not state:
-        user_id = current_user.get("uid")
+        user_id = current_user.id
         farm = db.query(Farm).filter(Farm.user_id == user_id).first()
         
         if (farm and farm.state and farm.district 

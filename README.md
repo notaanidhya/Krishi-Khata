@@ -31,7 +31,7 @@ A `ENABLE_DEV_BYPASS=true` flag in `.env` can skip JWT checks entirely during lo
 
 Prices are fetched on-demand rather than on a schedule. When the frontend requests prices for a commodity and district, the server checks if recent data exists (within the last 7 days). If not, it pulls up to 30 days of history from the `data.gov.in` API, stores it in the database, and returns it. This keeps memory usage low and avoids pulling data for regions nobody is looking at.
 
-A seeder in `main.py` populates a few commodity/district combinations with mock price data when the app runs in development mode (`FLASK_ENV=development`), so the frontend works without needing live API keys.
+A seeder in `main.py` populates a few commodity/district combinations with mock price data when the app runs in development mode (`ENVIRONMENT=development`), so the frontend works without needing live API keys.
 
 ### AI Features (Gemini)
 
@@ -111,8 +111,8 @@ pip install -r requirements.txt
 Create a `.env` file in the `server/` folder:
 
 ```env
-# App environment
-FLASK_ENV=development
+# App environment (valid values: development, production)
+ENVIRONMENT=development
 
 # Secret key (used for general signing — separate from JWT)
 SECRET_KEY=change-me-in-production
@@ -198,7 +198,7 @@ server/
 
 ## Development Notes
 
-- **Mock data seeder**: When `FLASK_ENV=development`, `main.py` seeds two demo farms and 30 days of price history for common commodities (Wheat, Rice, Onion, etc.) so the frontend works without any external API calls.
+- **Mock data seeder**: When `ENVIRONMENT=development`, `main.py` seeds two demo farms and 30 days of price history for common commodities (Wheat, Rice, Onion, etc.) so the frontend works without any external API calls.
 - **SQLite default**: If `DATABASE_URL` is not set, the app uses `instance/agroo.db`. This is fine for local dev but not for production.
 - **Uploads**: Profile and crop photos are stored in `uploads/` and served at `/uploads/<filename>`. This directory is created automatically if it doesn't exist.
 - **Migration scripts**: `add_laborer_column.py` and `migrate_auth.py` in the root are one-off migration helpers from earlier in the project. They are safe to ignore unless you are upgrading an older database.

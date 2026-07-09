@@ -14,6 +14,7 @@ from sqlalchemy import func
 
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.models.user import User
 from app.models.khata import KhataTransaction
 from app.schemas.khata import (
     TransactionCreate,
@@ -26,8 +27,8 @@ router = APIRouter()
 
 
 # ── Helper: get user_id from Firebase token ────────────────────
-def _uid(current_user: dict) -> str:
-    return current_user.get("uid", "dev-user-001")
+def _uid(current_user: User) -> str:
+    return current_user.id
 
 
 # ── GET /transactions — List with optional filters ─────────────
@@ -38,7 +39,7 @@ async def list_transactions(
     type: Optional[str] = Query(None, description="Filter by 'income' or 'expense'"),
     from_date: Optional[date] = Query(None, description="Start date (inclusive)"),
     to_date: Optional[date] = Query(None, description="End date (inclusive)"),
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -70,7 +71,7 @@ async def list_transactions(
 @router.post("/transactions", response_model=TransactionResponse, status_code=status.HTTP_201_CREATED)
 async def create_transaction(
     payload: TransactionCreate,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Create a new income or expense entry in the Khata."""
@@ -95,10 +96,13 @@ async def create_transaction(
 async def update_transaction(
     id: int,
     payload: TransactionUpdate,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Update an existing transaction. Only provided fields are changed."""
+    from pydantic import ValidationError
+    from app.schemas.khata import TransactionCreate
+    
     txn = db.query(KhataTransaction).filter(
         KhataTransaction.id == id,
         KhataTransaction.user_id == _uid(current_user),
@@ -107,7 +111,22 @@ async def update_transaction(
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found")
 
+    # Extract existing state
+    existing_data = txn.to_dict()
+    # Apply partial updates
     update_data = payload.model_dump(exclude_unset=True)
+    merged_data = {**existing_data, **update_data}
+
+    # Validate merged state against strict creation rules
+    try:
+        TransactionCreate(**merged_data)
+    except ValidationError as e:
+        # e.errors() is a list of dicts. We can return it directly or format it.
+        raise HTTPException(
+            status_code=422,
+            detail=e.errors()
+        )
+
     for field, value in update_data.items():
         setattr(txn, field, value)
 
@@ -120,7 +139,7 @@ async def update_transaction(
 @router.delete("/transactions/{id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_transaction(
     id: int,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Delete a transaction. Returns 204 on success."""
@@ -141,7 +160,7 @@ async def delete_transaction(
 @router.get("/summary", response_model=KhataSummary)
 async def get_summary(
     farm_id: Optional[int] = Query(None, description="Filter by farm"),
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """

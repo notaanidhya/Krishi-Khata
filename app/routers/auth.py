@@ -100,20 +100,15 @@ async def login(request: Request, payload: LoginRequest, db: Session = Depends(g
 
 @router.get("/me")
 async def get_profile(
-    current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get current user profile."""
-    uid = current_user.get("uid")
-    user = db.query(User).filter(User.id == uid).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user.to_dict()
+    return current_user.to_dict()
 
 
 @router.patch("/me")
 async def update_profile(
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Update display name or language preference."""

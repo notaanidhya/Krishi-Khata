@@ -20,9 +20,6 @@ class CropLogResponse(BaseModel):
     ai_analysis_failed: bool = False
     created_at: str
 
-    class Config:
-        from_attributes = True
-
 
 class CropCycleCreate(BaseModel):
     crop_name: str = Field(..., min_length=1, max_length=100, description="e.g. Wheat, Brinjal, Tomato")
@@ -38,12 +35,9 @@ class CropCycleResponse(BaseModel):
     status: str
     days_since_planting: int
     current_stage: str
-    cumulative_gdd: float
+    cumulative_gdd: int
     is_processing: bool
     validation_failed: bool = False
     created_at: str
     updated_at: str
     logs: List[CropLogResponse] = []
-
-    class Config:
-        from_attributes = True

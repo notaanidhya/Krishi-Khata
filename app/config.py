@@ -6,7 +6,7 @@ To switch to PostgreSQL, set DATABASE_URL in your .env:
     DATABASE_URL=postgresql://user:pass@localhost:5432/agroo
 """
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import model_validator
 from pathlib import Path
 
@@ -19,7 +19,7 @@ _JWT_SECRET_NOT_SET = "__NOT_SET__"
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Agroo"
     API_V1_STR: str = "/api/v1"
-    FLASK_ENV: str = "development"
+    ENVIRONMENT: str = "development"  # Valid values: "development", "production"
     SECRET_KEY: str = "change-me-in-production"
 
     # JWT — used for device-ID + PIN authentication
@@ -33,10 +33,18 @@ class Settings(BaseSettings):
     ENABLE_DEV_BYPASS: bool = False
 
     # Database — defaults to SQLite in server/instance/agroo.db
-    DATABASE_URL: str = f"sqlite:///{BASE_DIR / 'instance' / 'agroo.db'}"
+    DATABASE_URL: str = f"sqlite:///{(BASE_DIR / 'instance' / 'agroo.db').as_posix()}"
 
-    # CORS — allow Vite dev server
-    CORS_ORIGINS: list[str] = ["http://localhost:5173"]
+    # CORS — all allowed origins (dev + production)
+    CORS_ORIGINS: list[str] = [
+        "http://localhost:5173",          # Vite dev server
+        "http://localhost:5174",          # Vite fallback port
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "https://krishi-khata.vercel.app",  # Production frontend
+    ]
+    # Regex to allow Vercel branch/preview deployments (e.g. krishi-khata-abc123.vercel.app)
+    CORS_ORIGIN_REGEX: str = r"^https://krishi-khata(-[a-z0-9]+)?\.vercel\.app$"
 
     # Firebase (legacy — kept for future OTP upgrade)
     FIREBASE_SERVICE_ACCOUNT_PATH: str = str(BASE_DIR / "firebase-service-account.json")
@@ -45,13 +53,13 @@ class Settings(BaseSettings):
     USE_MOCK_DATA: bool = True
 
     # WeatherAPI.com — Hyper-local weather data
-    WEATHERAPI_KEY: str = ""
+    WEATHERAPI_KEY: str
 
     # Gemini AI — for Smart Farm Diary analysis
-    GEMINI_API_KEY: str = ""
+    GEMINI_API_KEY: str
 
     # data.gov.in — Mandi Price Daily Cache
-    DATAGOV_API_KEY: str = ""
+    DATAGOV_API_KEY: str
     MANDI_CACHE_INTERVAL_HOURS: int = 12
 
     @model_validator(mode="after")
@@ -71,8 +79,7 @@ class Settings(BaseSettings):
             )
         return self
 
-    class Config:
-        env_file = ".env"
+    model_config = SettingsConfigDict(env_file=".env")
 
 
 settings = Settings()

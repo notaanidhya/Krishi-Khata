@@ -19,6 +19,7 @@ from app.main import limiter
 from sqlalchemy.orm import Session, joinedload
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.models.user import User
 from app.models.crop import CropCycle, CropLog
 from app.schemas.crop import (
     CropCycleCreate,
@@ -141,7 +142,7 @@ async def _crop_to_response(crop: CropCycle) -> dict:
     
     # Add today's live GDD (forecast) to the cumulative total
     today_gdd = await get_todays_gdd(crop.farm.latitude, crop.farm.longitude)
-    total_gdd = crop.cumulative_gdd + today_gdd
+    total_gdd = int(crop.cumulative_gdd + today_gdd)
     
     current_stage = calculate_stage_by_gdd(crop.crop_name, total_gdd)
     known_crops = get_crop_presets()
@@ -170,11 +171,11 @@ async def list_crop_presets():
 # ── Farm CRUD ──────────────────────────────────────────────────
 @router.get("/farms", response_model=list[FarmResponse])
 async def list_farms(
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Return all farms owned by the current user."""
-    user_id = current_user.get("uid")
+    user_id = current_user.id
     farms = (
         db.query(Farm)
         .filter(Farm.user_id == user_id)
@@ -187,11 +188,11 @@ async def list_farms(
 @router.post("/farms", response_model=FarmResponse, status_code=status.HTTP_201_CREATED)
 async def create_farm(
     payload: FarmCreate,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Create a new farm for the current user."""
-    user_id = current_user.get("uid")
+    user_id = current_user.id
     farm = Farm(
         user_id=user_id,
         name=payload.name,
@@ -221,14 +222,14 @@ async def create_crop(
     farm_id: int,
     payload: CropCycleCreate,
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Plant a new crop cycle on a farm.
     Only one ACTIVE crop is allowed per farm at a time.
     Verifies farm ownership before creating.
     """
-    _verify_farm_ownership(farm_id, current_user.get("uid"), db)
+    _verify_farm_ownership(farm_id, current_user.id, db)
 
     farm = db.query(Farm).get(farm_id)
     
@@ -266,11 +267,11 @@ async def create_crop(
 async def retry_crop_validation(
     crop_id: int,
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Retry AI validation for a crop that failed processing."""
-    crop = _verify_crop_ownership(crop_id, current_user.get("uid"), db)
+    crop = _verify_crop_ownership(crop_id, current_user.id, db)
 
     # Reset both flags — ai_validated must also be cleared so the
     # processing badge re-appears while the background task runs
@@ -292,14 +293,14 @@ async def retry_crop_validation(
 )
 async def get_active_crop(
     farm_id: int,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Get the currently ACTIVE crop for a farm with calculated stage.
     Returns 404 if no active crop exists (frontend shows empty state).
     Verifies farm ownership.
     """
-    _verify_farm_ownership(farm_id, current_user.get("uid"), db)
+    _verify_farm_ownership(farm_id, current_user.id, db)
 
     crop = (
         db.query(CropCycle)
@@ -320,11 +321,11 @@ async def get_active_crop(
 @router.delete("/crops/{crop_id}")
 async def delete_crop(
     crop_id: int,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Delete a crop cycle. Verifies ownership via crop → farm → user."""
-    crop = _verify_crop_ownership(crop_id, current_user.get("uid"), db)
+    crop = _verify_crop_ownership(crop_id, current_user.id, db)
 
     db.delete(crop)
     db.commit()
@@ -337,14 +338,14 @@ async def delete_crop(
 async def list_crops(
     farm_id: int,
     status_filter: str | None = None,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Get all crop cycles for a farm, optionally filtered by status.
     Each cycle includes its diary logs (newest first).
     Verifies farm ownership.
     """
-    _verify_farm_ownership(farm_id, current_user.get("uid"), db)
+    _verify_farm_ownership(farm_id, current_user.id, db)
 
     query = (
         db.query(CropCycle)
@@ -371,7 +372,7 @@ async def ask_crop_ai(
     request: Request,
     crop_id: int,
     payload: CropAIQuery,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Ask the AI Crop Doctor a question about a specific crop.
@@ -380,7 +381,7 @@ async def ask_crop_ai(
     current growth stage, days since planting, and the farmer's question.
     Responds in the same language as the user's query.
     """
-    crop = _verify_crop_ownership(crop_id, current_user.get("uid"), db)
+    crop = _verify_crop_ownership(crop_id, current_user.id, db)
 
     days_since_planting = (date.today() - crop.planting_date).days
     current_stage, _ = calculate_stage(crop.crop_name, crop.planting_date)
@@ -444,11 +445,11 @@ async def ask_crop_ai(
 )
 async def harvest_crop(
     crop_id: int,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Mark an ACTIVE crop cycle as HARVESTED."""
-    crop = _verify_crop_ownership(crop_id, current_user.get("uid"), db)
+    crop = _verify_crop_ownership(crop_id, current_user.id, db)
 
     if crop.status == "HARVESTED":
         raise HTTPException(status_code=400, detail="Crop is already harvested")
@@ -475,13 +476,13 @@ async def harvest_crop(
 async def add_crop_log(
     crop_id: int,
     payload: CropLogCreate,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Add a new diary log (observation) to a crop cycle.
     Automatically calls the Gemini AI to extract growth stage and health notes.
     """
-    crop = _verify_crop_ownership(crop_id, current_user.get("uid"), db)
+    crop = _verify_crop_ownership(crop_id, current_user.id, db)
 
     # Call AI in a background thread to prevent blocking the event loop
     ai_result = await asyncio.to_thread(_analyze_with_gemini, payload.raw_content, crop.crop_name)
@@ -535,11 +536,11 @@ def _recalculate_status(tasks: list, days: int) -> list:
 async def get_crop_tasks(
     request: Request,
     crop_id: int,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Get crop schedule tasks from CropDataCache. No Gemini calls."""
-    crop = _verify_crop_ownership(crop_id, current_user.get("uid"), db)
+    crop = _verify_crop_ownership(crop_id, current_user.id, db)
     
     days_since_planting = (date.today() - crop.planting_date).days
     
@@ -569,11 +570,11 @@ async def get_crop_tasks(
 async def get_crop_about(
     request: Request,
     crop_id: int,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Get crop about text from CropDataCache. No Gemini calls."""
-    crop = _verify_crop_ownership(crop_id, current_user.get("uid"), db)
+    crop = _verify_crop_ownership(crop_id, current_user.id, db)
     
     cached = db.query(CropDataCache).filter(
         CropDataCache.standard_name_en == crop.crop_name

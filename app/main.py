@@ -27,13 +27,110 @@ from app.models.base import Base
 
 logger = logging.getLogger(__name__)
 
-# Dev convenience — create tables if they do not exist (keeps DB persistent across restarts)
-
-# Create all tables (dev convenience — use Alembic in production)
-Base.metadata.create_all(bind=engine)
 
 
-# ── Seed dev database with initial farms ────────────────────────
+
+async def _mandi_cache_worker():
+    from app.utils.mandi_api import fetch_mandi_prices, upsert_prices_to_db
+    from app.database import SessionLocal
+    from app.models.crop import CropCycle
+    from sqlalchemy import func
+
+    interval_seconds = settings.MANDI_CACHE_INTERVAL_HOURS * 3600
+    while True:
+        top_crops = []
+        try:
+            db = SessionLocal()
+            results = (
+                db.query(CropCycle.crop_name, func.count(CropCycle.id))
+                .filter(CropCycle.status == "ACTIVE")
+                .group_by(CropCycle.crop_name)
+                .order_by(func.count(CropCycle.id).desc())
+                .limit(7)
+                .all()
+            )
+            top_crops = [row[0] for row in results]
+        except Exception:
+            logger.exception("[MandiCacheWorker] Failed to query top crops.")
+        finally:
+            if 'db' in locals():
+                db.close()
+
+        # Fallback if the database has no active crops yet
+        if not top_crops:
+            top_crops = ["Wheat", "Soybean", "Onion", "Cotton", "Tomato", "Rice", "Maize"]
+
+        logger.info(
+            "[MandiCacheWorker] Starting cache refresh for top %d crops: %s "
+            "(next run in %sh).",
+            len(top_crops),
+            ", ".join(top_crops),
+            settings.MANDI_CACHE_INTERVAL_HOURS,
+        )
+
+        for crop in top_crops:
+            try:
+                loop = asyncio.get_running_loop()
+                data = await loop.run_in_executor(
+                    None,
+                    lambda c=crop: fetch_mandi_prices(
+                        state=None,  
+                        district=None, 
+                        commodity=c,
+                    ),
+                )
+                records = data.get("records", [])
+                if records:
+                    await loop.run_in_executor(None, upsert_prices_to_db, records)
+                    logger.info(
+                        "[MandiCacheWorker] Upserted %d overview records for crop: %s.",
+                        len(records),
+                        crop,
+                    )
+                else:
+                    logger.warning(
+                        "[MandiCacheWorker] No records returned for crop: %s — skipping upsert.",
+                        crop,
+                    )
+            except Exception:
+                logger.exception(
+                    "[MandiCacheWorker] Unhandled error for crop %s.", crop
+                )
+        logger.info("[MandiCacheWorker] Refresh complete. Sleeping for %sh.", settings.MANDI_CACHE_INTERVAL_HOURS)
+        await asyncio.sleep(interval_seconds)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application startup and shutdown.
+
+    Startup:
+      - Create DB tables in development (Alembic handles production migrations).
+      - Seed demo data in development.
+      - Launch the background Mandi cache-warming worker.
+
+    Shutdown:
+      - Cancel the background task cleanly.
+    """
+    # ── Startup ───────────────────────────────────────────────────────────────
+    if settings.ENVIRONMENT == "development":
+        Base.metadata.create_all(bind=engine)
+        seed_development_data()
+    else:
+        logger.info("Production mode — skipping table auto-create and dev seed.")
+
+    worker_task = asyncio.create_task(_mandi_cache_worker())
+    logger.info("[Lifespan] MandiCacheWorker started.")
+
+    yield 
+    worker_task.cancel()
+    try:
+        await worker_task
+    except asyncio.CancelledError:
+        logger.info("[Lifespan] MandiCacheWorker stopped cleanly.")
+
+
+
 def seed_development_data():
     from app.database import SessionLocal
     from app.models.farm import Farm
@@ -100,24 +197,14 @@ def seed_development_data():
         db.close()
 
 
-# Only seed mock data in local development — never in production
-if settings.FLASK_ENV == "development":
-    seed_development_data()
-else:
-    logger.info("Skipping dev seed — FLASK_ENV=%s", settings.FLASK_ENV)
 
 
-
-
-
-# ════════════════════════════════════════════════════════════════
-#  APP FACTORY
-# ════════════════════════════════════════════════════════════════
 
 app = FastAPI(
     title="Krishi Khata API",
     description="Mobile-first PWA backend for Indian farmers",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 from app.dependencies import limiter
@@ -128,17 +215,10 @@ app.add_middleware(SlowAPIMiddleware)
 
 from app.routers import auth, mandi, khata, weather, crop, chat, laborers
 
-origins = [
-    "http://localhost:5173", # So your local testing still works
-    "http://localhost:5174", # Allowed port when 5173 is in use
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:5174",
-    "https://krishi-khata.vercel.app", # Your live Vercel app
-]
+
 @app.middleware("http")
 async def add_cache_control_header(request, call_next):
     response = await call_next(request)
-    # Prevent browser/CDN caching for all dynamic API GET requests
     if request.url.path.startswith("/api") and request.method == "GET":
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
@@ -147,14 +227,13 @@ async def add_cache_control_header(request, call_next):
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_origin_regex=r"^https://krishi-khata(-[a-z0-9]+)?\.vercel\.app$",
+    allow_origins=settings.CORS_ORIGINS,
+    allow_origin_regex=settings.CORS_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include routers
 app.include_router(auth.router, prefix=f"{settings.API_V1_STR}/auth", tags=["Authentication"])
 app.include_router(mandi.router, prefix=f"{settings.API_V1_STR}/mandi", tags=["Mandi Prices"])
 app.include_router(khata.router, prefix=f"{settings.API_V1_STR}/khata", tags=["Kisan Khata"])
@@ -163,7 +242,6 @@ app.include_router(crop.router, prefix=settings.API_V1_STR, tags=["Farms & Crops
 app.include_router(chat.router, prefix=f"{settings.API_V1_STR}/chat", tags=["Community Chat"])
 app.include_router(laborers.router, prefix=settings.API_V1_STR, tags=["Labor Management"])
 
-# Serve uploaded images as static files
 UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")

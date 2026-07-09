@@ -4,7 +4,7 @@ Pydantic schemas for Kisan Khata — request/response validation.
 
 from datetime import date
 from typing import Optional, Literal
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 
 
 # ── Valid Categories ────────────────────────────────────────────
@@ -76,8 +76,7 @@ class TransactionResponse(BaseModel):
     transaction_date: date
     created_at: str  # ISO string from to_dict()
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class KhataSummary(BaseModel):

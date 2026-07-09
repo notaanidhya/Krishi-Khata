@@ -35,15 +35,16 @@ async def get_current_user(
         # Verify the user actually exists in the DB to handle DB wipes/switches
         from app.models.user import User
         uid = payload.get("uid")
-        if not db.query(User).filter(User.id == uid).first():
+        user = db.query(User).filter(User.id == uid).first()
+        if not user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User no longer exists",
                 headers={"WWW-Authenticate": "Bearer"},
             )
             
-        return payload
-    except Exception:
+        return user
+    except jwt.PyJWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired authentication token",

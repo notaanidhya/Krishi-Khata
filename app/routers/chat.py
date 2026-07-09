@@ -25,6 +25,7 @@ from app.models.chat import CommunityMessage
 from app.schemas.chat import ChatMessageResponse
 from app.config import settings
 from app.dependencies import get_current_user
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ manager = ConnectionManager()
 @router.get("/history", response_model=List[ChatMessageResponse])
 async def get_chat_history(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """Return the last 50 community messages, oldest first."""
     messages = (
@@ -100,7 +101,7 @@ async def get_chat_history(
 @router.post("/upload")
 async def upload_image(
     file: UploadFile = File(...),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """
     Upload an image for the community chat.
@@ -165,6 +166,9 @@ async def websocket_chat(websocket: WebSocket):
             if not uid:
                 return await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
                 
+    except WebSocketDisconnect:
+        logger.info("Client disconnected before completing WS auth.")
+        return
     except asyncio.TimeoutError:
         logger.warning("WebSocket authentication timed out")
         return await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
@@ -173,7 +177,10 @@ async def websocket_chat(websocket: WebSocket):
         return await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
     except Exception as e:
         logger.error(f"Unexpected error during WS auth: {e}", exc_info=True)
-        return await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+        try:
+            return await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+        except RuntimeError:
+            pass
 
     if not uid and settings.ENABLE_DEV_BYPASS:
         uid = "dev-bypass-user"

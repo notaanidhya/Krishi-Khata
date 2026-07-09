@@ -17,6 +17,7 @@ from sqlalchemy import func, case
 
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.models.user import User
 from app.models.farm import Farm
 from app.models.laborer import Laborer
 from app.models.khata import KhataTransaction
@@ -26,8 +27,8 @@ router = APIRouter()
 
 
 # ── Helper: get user_id from JWT payload ────────────────────────
-def _uid(current_user: dict) -> str:
-    return current_user.get("uid", "dev-user-001")
+def _uid(current_user: User) -> str:
+    return current_user.id
 
 
 def _verify_farm_ownership(farm_id: int, user_id: str, db: Session) -> Farm:
@@ -88,7 +89,7 @@ def _calculate_balance(laborer_id: int, db: Session) -> float:
 async def add_laborer(
     farm_id: int,
     payload: LaborerCreate,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Add a new laborer to a farm. Verifies user ownership of the farm."""
@@ -118,7 +119,7 @@ async def add_laborer(
 async def list_laborers(
     farm_id: int,
     active_only: bool = Query(True, description="If true, only return active laborers"),
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -194,7 +195,7 @@ async def list_laborers(
 async def get_laborer(
     farm_id: int,
     laborer_id: int,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Get a single laborer's details with their calculated balance."""
@@ -224,7 +225,7 @@ async def update_laborer(
     farm_id: int,
     laborer_id: int,
     payload: LaborerUpdate,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Update a laborer's details (name, phone, active status)."""
