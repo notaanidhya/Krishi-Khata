@@ -6,6 +6,81 @@ Deployed on **Render**. Database hosted on **Neon (PostgreSQL)**.
 
 ---
 
+## System Architecture
+
+The following diagram illustrates how the backend integrates with the frontend and external services in the complete Krishi Khata ecosystem:
+
+```mermaid
+graph TD
+    %% Styling
+    classDef frontend fill:#61dafb,stroke:#000,stroke-width:2px,color:#000;
+    classDef backend fill:#009688,stroke:#000,stroke-width:2px,color:#fff;
+    classDef database fill:#ff9800,stroke:#000,stroke-width:2px,color:#000;
+    classDef external fill:#9c27b0,stroke:#000,stroke-width:2px,color:#fff;
+    classDef clientGroup fill:#e3f2fd,stroke:#2196f3,stroke-width:2px,color:#000;
+    classDef serverGroup fill:#e0f2f1,stroke:#009688,stroke-width:2px,color:#000;
+
+    %% Frontend Subgraph
+    subgraph Client["Frontend Application (React/Vite)"]
+        direction TB
+        UI[React Components]
+        Router[React Router DOM]
+        State[State Mgt & Fetching<br/>TanStack Query / Axios]
+        Styling[TailwindCSS & Framer Motion]
+        i18n[i18next / Localization]
+        PWA[Vite PWA]
+
+        UI --> Router
+        UI --> State
+        UI --> Styling
+        UI --> i18n
+        UI --> PWA
+    end
+
+    %% Backend Subgraph
+    subgraph Server["Backend API (FastAPI)"]
+        direction TB
+        API[FastAPI Routers / Endpoints]
+        Auth[Authentication & Security<br/>JWT / Passlib / SlowAPI]
+        Services[Business Logic Layer<br/>Services & Utilities]
+        DataLayer[Data Access Layer<br/>SQLAlchemy Models / Pydantic]
+        
+        API --> Auth
+        API --> Services
+        Services --> DataLayer
+    end
+
+    %% Database
+    subgraph Database["Database"]
+        DB[(Relational DB<br/>SQLite/PostgreSQL)]
+    end
+
+    %% External Services
+    subgraph ExtDependencies["External Services & APIs"]
+        direction TB
+        GenAI[Google GenAI]
+        Firebase[Firebase Admin]
+        Translate[Deep Translator]
+    end
+
+    %% Connections
+    State -- "RESTful HTTP API" --> API
+    DataLayer -- "SQL / ORM Queries" --> DB
+    Services -- "LLM Requests" --> GenAI
+    Services -- "Push / Auth" --> Firebase
+    Services -- "Translations" --> Translate
+
+    %% Apply Styles
+    class Client clientGroup;
+    class Server serverGroup;
+    class UI,Router,State,Styling,i18n,PWA frontend;
+    class API,Auth,Services,DataLayer backend;
+    class DB database;
+    class GenAI,Firebase,Translate external;
+```
+
+---
+
 ## What It Does
 
 ### API Modules

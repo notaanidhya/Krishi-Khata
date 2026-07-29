@@ -30,7 +30,7 @@ from sqlalchemy import func
 
 @router.get("/check-username")
 async def check_username(name: str, db: Session = Depends(get_db)):
-    """Check if a username is already taken."""
+    
     user = db.query(User).filter(func.lower(User.display_name) == name.lower()).first()
     return {"exists": bool(user)}
 
@@ -38,13 +38,11 @@ async def check_username(name: str, db: Session = Depends(get_db)):
 @router.post("/register", response_model=AuthResponse)
 @limiter.limit("5/minute")
 async def register(request: Request, payload: RegisterRequest, db: Session = Depends(get_db)):
-    """Register a new device with a PIN."""
-    # Check if device_id already exists (edge case)
     existing_device = db.query(User).filter(User.id == payload.device_id).first()
     if existing_device:
         raise HTTPException(status_code=400, detail="Device already registered")
 
-    # Check if username already exists
+    
     existing_user_by_name = db.query(User).filter(func.lower(User.display_name) == payload.display_name.lower()).first()
     if existing_user_by_name:
         raise HTTPException(status_code=400, detail="Username already exists")
@@ -59,7 +57,7 @@ async def register(request: Request, payload: RegisterRequest, db: Session = Dep
     db.commit()
     db.refresh(new_user)
     
-    # Auto-create a default farm for the new user
+    
     default_farm = Farm(
         user_id=new_user.id,
         name=f"{new_user.display_name} का खेत",
@@ -111,6 +109,5 @@ async def update_profile(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Update display name or language preference."""
-    # TODO: Implement in Phase 1
+    
     return {"message": "update-profile stub"}
