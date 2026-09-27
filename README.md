@@ -2,7 +2,8 @@
 
 A FastAPI backend that powers the Krishi Khata PWA. It handles farm and ledger management, crop tracking, real-time community chat, mandi (market) price data, AI-driven weather advisories, and labor management.
 
-Deployed on **Render**. Database hosted on **Neon (PostgreSQL)**.
+Deployed on **Render**. Database hosted on **Neon (PostgreSQL)**.  
+Frontend (Vercel): [https://krishi-khata.vercel.app/home](https://krishi-khata.vercel.app/home)
 
 ---
 
